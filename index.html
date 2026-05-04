@@ -128,7 +128,7 @@ async function send(){
     if(!msg)return;i.value='';
     addMsg(msg,'u');
     try{
-        const r=await fetch('https://uagyqmezagzohwvhosuj.supabase.co/functions/v1/chat-handler',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tk},body:JSON.stringify({message:msg})});
+        const r=await fetch('https://uagyqmezagzohwvhosuj.supabase.co/functions/v1/chat',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tk},body:JSON.stringify({message:msg})});
         const txt=await r.text();
         let d;
         try{d=JSON.parse(txt)}catch(x){addMsg('Server returned: '+txt,'a');return}

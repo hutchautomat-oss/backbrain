@@ -7,16 +7,19 @@
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0a;color:#e0e0e0;height:100vh;display:flex;justify-content:center;align-items:center}
-        #auth{text-align:center;width:320px}
-        #auth h1{font-size:1.8rem;color:#c8a84e;margin-bottom:8px}
-        #auth .sub{color:#666;margin-bottom:24px;font-size:.9rem}
-        #auth input{width:100%;padding:12px 16px;margin-bottom:12px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:1rem;outline:none}
-        #auth input:focus{border-color:#c8a84e}
-        #auth button{width:100%;padding:12px;background:#c8a84e;color:#0a0a0a;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
-        #auth button:hover{background:#d4b65e}
-        #err{color:#e74c3c;margin-top:12px;font-size:.85rem}
-        #toggle{margin-top:16px;color:#666;font-size:.85rem}
-        #toggle a{color:#c8a84e;cursor:pointer;text-decoration:none}
+        .panel{text-align:center;width:320px}
+        .panel h1{font-size:1.8rem;color:#c8a84e;margin-bottom:8px}
+        .panel .sub{color:#666;margin-bottom:24px;font-size:.9rem}
+        .panel input{width:100%;padding:12px 16px;margin-bottom:12px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:1rem;outline:none;text-align:center;letter-spacing:2px}
+        .panel input[type=email]{text-align:left;letter-spacing:normal}
+        .panel input:focus{border-color:#c8a84e}
+        .panel button.main{width:100%;padding:12px;background:#c8a84e;color:#0a0a0a;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;margin-top:4px}
+        .panel button.main:hover{background:#d4b65e}
+        .panel button.main:disabled{background:#555;cursor:not-allowed}
+        .err{color:#e74c3c;margin-top:12px;font-size:.85rem;word-break:break-word}
+        .back{margin-top:16px;color:#666;font-size:.85rem}
+        .back a{color:#c8a84e;cursor:pointer;text-decoration:none}
+        .hidden{display:none}
         #chat{display:none;flex-direction:column;width:100%;height:100vh;max-width:700px;margin:0 auto}
         #chat-head{padding:16px 20px;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center}
         #chat-head h2{color:#c8a84e;font-size:1.2rem}
@@ -28,20 +31,26 @@
         .m.u .b{background:#c8a84e;color:#0a0a0a}
         .m.a .b{background:#1a1a1a;color:#e0e0e0}
         #bar{display:flex;padding:16px 20px;border-top:1px solid #222;gap:12px}
-        #bar input{flex:1;padding:12px 16px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:1rem;outline:none}
+        #bar input{flex:1;padding:12px 16px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:1rem;outline:none;text-align:left;letter-spacing:normal}
         #bar input:focus{border-color:#c8a84e}
         #bar button{padding:12px 20px;background:#c8a84e;color:#0a0a0a;border:none;border-radius:8px;font-weight:600;cursor:pointer}
     </style>
 </head>
 <body>
-<div id="auth">
+<div id="step1" class="panel">
     <h1>Back Brain</h1>
     <p class="sub">Universal memory mount</p>
-    <input type="email" id="email" placeholder="Email" />
-    <input type="password" id="password" placeholder="Password" />
-    <button onclick="connect()">Connect</button>
-    <div id="err"></div>
-    <div id="toggle"><span id="tgl">No account? <a onclick="flip()">Sign up</a></span></div>
+    <input type="email" id="email" placeholder="Enter your email" />
+    <button class="main" id="sendBtn" onclick="sendCode()">Send Code</button>
+    <div id="s1-err" class="err"></div>
+</div>
+<div id="step2" class="panel hidden">
+    <h1>Back Brain</h1>
+    <p class="sub" id="sent-to">Code sent to your email</p>
+    <input type="text" id="code" placeholder="Enter 6-digit code" maxlength="6" />
+    <button class="main" onclick="verifyCode()">Verify</button>
+    <div id="s2-err" class="err"></div>
+    <div class="back"><a onclick="backToEmail()">Use a different email</a></div>
 </div>
 <div id="chat">
     <div id="chat-head">
@@ -55,49 +64,77 @@
     </div>
 </div>
 <script>
-const API='https://uagyqmezagzohwvhosuj.supabase.co/functions/v1';
-let tk=localStorage.getItem('bb_token'),mode='login';
+const API='https://uagyqmezagzohwvhosuj.supabase.co/functions/v1/auth-handler';
+let tk=localStorage.getItem('bb_token');
+let userEmail='';
 if(tk)showChat();
-function flip(){
-    mode=mode==='login'?'signup':'login';
-    document.getElementById('tgl').innerHTML=mode==='login'
-        ?'No account? <a onclick="flip()">Sign up</a>'
-        :'Have an account? <a onclick="flip()">Log in</a>';
-}
-async function connect(){
-    const e=document.getElementById('email').value;
-    const p=document.getElementById('password').value;
-    const err=document.getElementById('err');
+async function sendCode(){
+    const e=document.getElementById('email').value.trim();
+    const err=document.getElementById('s1-err');
+    const btn=document.getElementById('sendBtn');
     err.textContent='';
+    if(!e){err.textContent='Enter your email';return}
+    btn.disabled=true;btn.textContent='Sending...';
     try{
-        const r=await fetch(API+'/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e,password:p,action:mode})});
-        const d=await r.json();
-        if(!r.ok)throw new Error(d.error||'Connection failed');
-        tk=d.access_token||d.token;
-        if(!tk)throw new Error('No token received');
+        const r=await fetch(API+'/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e})});
+        const txt=await r.text();
+        let d;
+        try{d=JSON.parse(txt)}catch(x){err.textContent='Server returned: '+txt;btn.disabled=false;btn.textContent='Send Code';return}
+        if(!r.ok){err.textContent=d.error||'Failed ('+r.status+')';btn.disabled=false;btn.textContent='Send Code';return}
+        userEmail=e;
+        document.getElementById('sent-to').textContent='Code sent to '+e;
+        document.getElementById('step1').classList.add('hidden');
+        document.getElementById('step2').classList.remove('hidden');
+        document.getElementById('code').focus();
+    }catch(x){err.textContent='Network error: '+x.message}
+    btn.disabled=false;btn.textContent='Send Code';
+}
+async function verifyCode(){
+    const c=document.getElementById('code').value.trim();
+    const err=document.getElementById('s2-err');
+    err.textContent='';
+    if(!c){err.textContent='Enter the code from your email';return}
+    try{
+        const r=await fetch(API+'/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:userEmail,token:c})});
+        const txt=await r.text();
+        let d;
+        try{d=JSON.parse(txt)}catch(x){err.textContent='Server returned: '+txt;return}
+        if(!r.ok){err.textContent=d.error||'Verification failed ('+r.status+')';return}
+        tk=d.session?.access_token||d.access_token||d.token;
+        if(!tk){err.textContent='No token received. Response: '+txt;return}
         localStorage.setItem('bb_token',tk);
+        if(d.session?.refresh_token)localStorage.setItem('bb_refresh',d.session.refresh_token);
         showChat();
-    }catch(x){err.textContent=x.message}
+    }catch(x){err.textContent='Network error: '+x.message}
+}
+function backToEmail(){
+    document.getElementById('step2').classList.add('hidden');
+    document.getElementById('step1').classList.remove('hidden');
+    document.getElementById('s2-err').textContent='';
+    document.getElementById('code').value='';
 }
 function showChat(){
-    document.getElementById('auth').style.display='none';
+    document.getElementById('step1').classList.add('hidden');
+    document.getElementById('step2').classList.add('hidden');
     document.getElementById('chat').style.display='flex';
 }
 function logout(){
-    tk=null;localStorage.removeItem('bb_token');
+    tk=null;localStorage.removeItem('bb_token');localStorage.removeItem('bb_refresh');
     document.getElementById('chat').style.display='none';
-    document.getElementById('auth').style.display='block';
+    document.getElementById('step1').classList.remove('hidden');
 }
 async function send(){
     const i=document.getElementById('inp'),msg=i.value.trim();
     if(!msg)return;i.value='';
     addMsg(msg,'u');
     try{
-        const r=await fetch(API+'/chat',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tk},body:JSON.stringify({message:msg})});
-        const d=await r.json();
-        if(!r.ok){if(r.status===401){logout();return}throw new Error(d.error||'Failed')}
+        const r=await fetch('https://uagyqmezagzohwvhosuj.supabase.co/functions/v1/chat-handler',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tk},body:JSON.stringify({message:msg})});
+        const txt=await r.text();
+        let d;
+        try{d=JSON.parse(txt)}catch(x){addMsg('Server returned: '+txt,'a');return}
+        if(!r.ok){if(r.status===401){logout();return}addMsg(d.error||'Failed','a');return}
         addMsg(d.reply||d.response||d.message,'a');
-    }catch(x){addMsg('Error: '+x.message,'a')}
+    }catch(x){addMsg('Network error: '+x.message,'a')}
 }
 function addMsg(t,c){
     const d=document.createElement('div');d.className='m '+c;

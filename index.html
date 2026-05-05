@@ -342,35 +342,6 @@ GROUNDING AWARENESS:
 - If your context feels thin or contradictory, say so. Suggest the user trigger a grounding cycle.
 - After grounding, you are sharper — not because you forgot, but because you consolidated.`
 
-// ====== BUILD SPEC PROMPT ======
-const BUILD_SPEC_PROMPT = `You are now in ARCHITECT MODE. You are not advising. You are DESIGNING an application.
-
-Using everything you know from your grounding document and stored knowledge, generate a complete app specification in valid JSON.
-
-OUTPUT THIS EXACT FORMAT (no markdown, no explanation, just JSON):
-{
-  "app_name": "Name of the app",
-  "purpose": "One sentence — what it does and who it's for",
-  "pages": [
-    {
-      "name": "Page Name",
-      "components": ["list", "of", "ui", "elements"],
-      "interactions": ["what happens when user does X"]
-    }
-  ],
-  "data_model": {
-    "table_name": ["column1", "column2", "column3"]
-  },
-  "style": "visual direction — colors, mood, typography feel",
-  "tech_notes": "any technical considerations from your knowledge"
-}
-
-RULES:
-- Output ONLY valid JSON. No markdown fences. No explanation before or after.
-- Use your C-Suite knowledge to inform decisions (food science, branding, operations — whatever is relevant).
-- Be specific in components and interactions, not vague.
-- The spec should be detailed enough that a developer could build it without asking questions.`
-
 // ====== CHAT SETUP ======
 const history = []
 
@@ -581,40 +552,7 @@ async function send() {
 
   try {
     let reply
-
-    // ====== /build COMMAND — ARCHITECT MODE ======
-    if (userText.startsWith('/build ')) {
-      const buildRequest = userText.substring(7).trim()
-      dots.textContent = 'Architecting...'
-      addMsg('system', 'Entering architect mode...')
-
-      let specPrompt = BUILD_SPEC_PROMPT + '\n\n'
-      if (latestGrounding) {
-        specPrompt += '== YOUR KNOWLEDGE (use this to inform the design) ==\n' + latestGrounding + '\n== END KNOWLEDGE ==\n\n'
-      }
-      if (knowledgeBase.length > 0) {
-        specPrompt += '== DOMAIN EXPERTISE (' + knowledgeBase.length + ' entries) ==\n'
-        knowledgeBase.slice(-10).forEach(k => {
-          specPrompt += '[' + k.source_type.toUpperCase() + '] ' + k.source_name + ': ' + k.content.substring(0, 300) + '\n'
-        })
-        specPrompt += '== END EXPERTISE ==\n'
-      }
-
-      reply = await callLLM([
-        { role: 'system', content: specPrompt },
-        { role: 'user', content: 'Build this: ' + buildRequest }
-      ])
-
-      dots.textContent = reply
-      history.push({ role: 'user', content: userText })
-      history.push({ role: 'assistant', content: reply })
-      await saveMsg('user', userText)
-      await saveMsg('assistant', reply)
-      await saveKnowledge('spec', buildRequest, reply)
-      addMsg('system', 'App spec saved to memory')
-
-    // ====== IMAGE HANDLING ======
-    } else if (hasImage) {
+    if (hasImage) {
       const path = currentUser.id + '/' + Date.now() + '_' + pendingImage.name
       await sb.storage.from('user-files').upload(path, pendingImage.file)
       const imagePrompt = DEEP_IMAGE_PROMPT + '\n\nThe user says: "' + userText + '"'
@@ -630,8 +568,6 @@ async function send() {
       addMsg('system', 'Deep image analysis saved to memory')
       pendingImage = null
       $('pending-file').style.display = 'none'
-
-    // ====== NORMAL CHAT ======
     } else {
       dots.textContent = 'Thinking...'
       const searchDecision = await shouldSearch(userText)

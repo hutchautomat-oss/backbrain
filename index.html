@@ -147,14 +147,17 @@ let sessionMsgCount = 0
 let webSearchAvailable = true
 let vaultKey = null
 
-// ====== CRYPTO ======
+// ====== CRYPTO (AES-256-GCM + PBKDF2) ======
 function b64Encode(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))) }
 function b64Decode(str) { return Uint8Array.from(atob(str), c => c.charCodeAt(0)) }
 
 async function deriveKey(password, salt) {
   const enc = new TextEncoder()
   const material = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey'])
-  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+    material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+  )
 }
 
 async function vaultEncrypt(password, plaintext) {
@@ -179,6 +182,7 @@ $('vault-unlock').onclick = async () => {
   const pw = $('master-pw').value
   if (!pw) return
   $('vault-err').style.display = 'none'
+
   const { data: checks } = await sb.from('vault').select('*').eq('name', VAULT_CHECK_NAME).limit(1)
   if (checks && checks.length > 0) {
     try {
@@ -193,6 +197,7 @@ $('vault-unlock').onclick = async () => {
     const enc = await vaultEncrypt(pw, VAULT_CHECK_VALUE)
     await sb.from('vault').insert({ user_id: currentUser.id, name: VAULT_CHECK_NAME, ...enc })
   }
+
   vaultKey = pw
   $('master-pw').value = ''
   $('vault-locked').style.display = 'none'
@@ -211,6 +216,7 @@ $('vault-save').onclick = async () => {
   const name = $('vault-add-name').value.trim()
   const secret = $('vault-add-secret').value
   if (!name || !secret || !vaultKey) return
+
   const enc = await vaultEncrypt(vaultKey, secret)
   await sb.from('vault').insert({ user_id: currentUser.id, name, ...enc })
   $('vault-add-name').value = ''
@@ -231,17 +237,46 @@ async function loadVaultEntries() {
   data.forEach(entry => {
     const div = document.createElement('div')
     div.className = 've'
-    div.innerHTML = '<div class="ve-row"><span class="ve-name">' + entry.name + '</span><div class="ve-actions"><button class="reveal" data-id="' + entry.id + '">show</button><button class="copy" data-id="' + entry.id + '">copy</button><button class="del" data-id="' + entry.id + '">✕</button></div></div><div class="ve-secret" id="vs-' + entry.id + '">••••••••</div>'
+    div.innerHTML = `
+      <div class="ve-row">
+        <span class="ve-name">${entry.name}</span>
+        <div class="ve-actions">
+          <button class="reveal" data-id="${entry.id}">show</button>
+          <button class="copy" data-id="${entry.id}">copy</button>
+          <button class="del" data-id="${entry.id}">✕</button>
+        </div>
+      </div>
+      <div class="ve-secret" id="vs-${entry.id}">••••••••</div>
+    `
     div.querySelector('.reveal').onclick = async function() {
       const secretEl = $('vs-' + entry.id)
-      if (secretEl.style.display === 'block') { secretEl.style.display = 'none'; secretEl.textContent = '••••••••'; this.textContent = 'show'; return }
-      try { const plain = await vaultDecrypt(vaultKey, entry.encrypted_data, entry.iv, entry.salt); secretEl.textContent = plain; secretEl.style.display = 'block'; this.textContent = 'hide' }
-      catch { secretEl.textContent = 'Decrypt failed'; secretEl.style.display = 'block' }
+      if (secretEl.style.display === 'block') {
+        secretEl.style.display = 'none'
+        secretEl.textContent = '••••••••'
+        this.textContent = 'show'
+        return
+      }
+      try {
+        const plain = await vaultDecrypt(vaultKey, entry.encrypted_data, entry.iv, entry.salt)
+        secretEl.textContent = plain
+        secretEl.style.display = 'block'
+        this.textContent = 'hide'
+      } catch { secretEl.textContent = 'Decrypt failed'; secretEl.style.display = 'block' }
     }
     div.querySelector('.copy').onclick = async () => {
-      try { const plain = await vaultDecrypt(vaultKey, entry.encrypted_data, entry.iv, entry.salt); await navigator.clipboard.writeText(plain); const btn = div.querySelector('.copy'); btn.textContent = '✓'; setTimeout(() => btn.textContent = 'copy', 1500) } catch {}
+      try {
+        const plain = await vaultDecrypt(vaultKey, entry.encrypted_data, entry.iv, entry.salt)
+        await navigator.clipboard.writeText(plain)
+        const btn = div.querySelector('.copy')
+        btn.textContent = '✓'
+        setTimeout(() => btn.textContent = 'copy', 1500)
+      } catch { /* silent */ }
     }
-    div.querySelector('.del').onclick = async () => { if (!confirm('Delete "' + entry.name + '"?')) return; await sb.from('vault').delete().eq('id', entry.id); await loadVaultEntries() }
+    div.querySelector('.del').onclick = async () => {
+      if (!confirm('Delete "' + entry.name + '"?')) return
+      await sb.from('vault').delete().eq('id', entry.id)
+      await loadVaultEntries()
+    }
     container.appendChild(div)
   })
 }
@@ -271,10 +306,43 @@ $('verify-otp').onclick = async () => {
 }
 
 $('logout').onclick = async () => { vaultKey = null; await sb.auth.signOut(); location.reload() }
-sb.auth.getSession().then(({ data: { session } }) => { if (session) { currentUser = session.user; showChat() } })
+sb.auth.getSession().then(({ data: { session } }) => {
+  if (session) { currentUser = session.user; showChat() }
+})
 
 // ====== SYSTEM PROMPT ======
-const SELF_AWARE_PROMPT = 
+const SELF_AWARE_PROMPT = `You are Back Brain — a personal knowledge engine with persistent memory, web access, and self-grounding.
+
+YOUR ABILITIES:
+- VISION: Deep image analysis. Every detail — objects, text, colors, layout, context, hidden details. Never skim.
+- HEARING: Audio transcription and analysis. Key points, decisions, names, tone, subtext.
+- FILE READING: Full document analysis. Structure, meaning, relationships, actionable knowledge.
+- WEB SEARCH: Live web data when your stored knowledge is insufficient. Current events, facts, lookups.
+- MEMORY: Permanent storage of everything learned. Carried into every conversation.
+- GROUNDING: Periodic self-consolidation. You compress all knowledge into a grounding document to prevent drift and sharpen context over time.
+
+HOW YOU ANSWER:
+1. Check your grounding document first — it is your consolidated understanding.
+2. Check raw stored knowledge for specifics the grounding doc may have compressed.
+3. If you need current data or facts you are not confident about, search the web.
+4. Synthesize all sources into one answer. Cite where each claim comes from: [memory], [web], or [conversation].
+5. Never guess when you can look it up. Never defend a shallow read.
+6. Make connections across sources the user has not asked for, if genuinely useful.
+7. Be direct. No padding.
+
+WHEN WEB SEARCH IS NEEDED:
+- Current events, news, prices, availability
+- Specific facts you are unsure about (names, dates, technical specs)
+- URLs, products, companies, people the user asks about
+- Anything where stored knowledge is stale or absent
+- When the user says "look it up" or "search for"
+
+GROUNDING AWARENESS:
+- You know your context window is finite. You manage it through grounding.
+- If your context feels thin or contradictory, say so. Suggest the user trigger a grounding cycle.
+- After grounding, you are sharper — not because you forgot, but because you consolidated.`
+
+// ====== BUILD SPEC PROMPT ======
 const BUILD_SPEC_PROMPT = `You are now in ARCHITECT MODE. You are not advising. You are DESIGNING an application.
 
 Using everything you know from your grounding document and stored knowledge, generate a complete app specification in valid JSON.
@@ -303,6 +371,7 @@ RULES:
 - Be specific in components and interactions, not vague.
 - The spec should be detailed enough that a developer could build it without asking questions.`
 
+// ====== CHAT SETUP ======
 const history = []
 
 function buildSystemPrompt() {
@@ -412,7 +481,9 @@ async function braveSearch(query) {
     const results = data.web?.results || []
     return results.map(r => '- ' + r.title + '\n  ' + r.url + '\n  ' + (r.description || '')).join('\n\n')
   } catch (e) {
-    if (e.message.includes('Failed to fetch') || e.message.includes('CORS') || e.message.includes('NetworkError')) webSearchAvailable = false
+    if (e.message.includes('Failed to fetch') || e.message.includes('CORS') || e.message.includes('NetworkError')) {
+      webSearchAvailable = false
+    }
     return null
   }
 }
@@ -490,11 +561,11 @@ const DEEP_IMAGE_PROMPT = `Conduct a thorough visual analysis. Cover ALL:
 Do not skim. Scan the entire image systematically.`
 
 function buildFileAnalysisPrompt(fileName, fileContent) {
-  return 'File uploaded: "' + fileName + '"\n\nContent:\n---\n' + fileContent + '\n---\n\nAnalyze thoroughly:\n1. STRUCTURE: What kind of document?\n2. KEY CONTENT: Most important facts, data, ideas.\n3. DETAILS: Names, numbers, dates, URLs, code.\n4. THEMES: Patterns, recurring ideas.\n5. CONNECTIONS: How does this relate to user\'s other projects?\n6. ACTIONABLE: Anything to act on or follow up?'
+  return `File uploaded: "${fileName}"\n\nContent:\n---\n${fileContent}\n---\n\nAnalyze thoroughly:\n1. STRUCTURE: What kind of document?\n2. KEY CONTENT: Most important facts, data, ideas.\n3. DETAILS: Names, numbers, dates, URLs, code.\n4. THEMES: Patterns, recurring ideas.\n5. CONNECTIONS: How does this relate to user's other projects?\n6. ACTIONABLE: Anything to act on or follow up?`
 }
 
 function buildAudioAnalysisPrompt(fileName, transcript) {
-  return 'Audio file: "' + fileName + '"\n\nTranscript:\n---\n' + transcript + '\n---\n\nAnalyze:\n1. KEY POINTS: Main ideas.\n2. DECISIONS AND ACTION ITEMS.\n3. NAMES AND REFERENCES.\n4. TONE AND CONTEXT.\n5. SUBTEXT: What is implied?\n6. CONNECTIONS to user\'s other work.'
+  return `Audio file: "${fileName}"\n\nTranscript:\n---\n${transcript}\n---\n\nAnalyze:\n1. KEY POINTS: Main ideas.\n2. DECISIONS AND ACTION ITEMS.\n3. NAMES AND REFERENCES.\n4. TONE AND CONTEXT.\n5. SUBTEXT: What is implied?\n6. CONNECTIONS to user's other work.`
 }
 
 // ====== SEND MESSAGE ======
@@ -595,6 +666,7 @@ $('cancel-pending').onclick = () => { pendingImage = null; $('pending-file').sty
 $('file-input').onchange = async (e) => {
   const file = e.target.files[0]
   if (!file) return
+
   if (file.type.startsWith('image/')) {
     const reader = new FileReader()
     reader.onload = () => {
@@ -649,7 +721,11 @@ $('file-input').onchange = async (e) => {
 
 // ====== VOICE RECORDING ======
 $('mic-btn').onclick = async () => {
-  if (mediaRecorder && mediaRecorder.state === 'recording') { mediaRecorder.stop(); $('mic-btn').classList.remove('recording'); return }
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop()
+    $('mic-btn').classList.remove('recording')
+    return
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     audioChunks = []

@@ -134,8 +134,6 @@ const GROUNDING_INTERVAL = 10
 const VAULT_CHECK_NAME = '__vault_check__'
 const VAULT_CHECK_VALUE = 'backbrain_vault_ok'
 
-// ====== PROVIDER ROTATION ======
-// Groq → Cerebras → OpenRouter. If one rate limits, next one catches it.
 const PROVIDERS = [
   {
     name: 'Groq',
@@ -195,6 +193,114 @@ async function vaultDecrypt(password, encrypted_data, iv, salt) {
   const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64Decode(iv) }, key, b64Decode(encrypted_data))
   return new TextDecoder().decode(decrypted)
 }
+
+// ====== GITHUB API MODULE ======
+const GitHub = {
+
+  org: 'hutchautomat-oss',
+
+  async getToken() {
+    if (!vaultKey) throw new Error('Vault is locked. Click the lock icon and unlock first.')
+    const { data } = await sb.from('vault').select('*').eq('name', 'GitHub PAT').limit(1)
+    if (!data || data.length === 0) throw new Error('GitHub PAT not found in Vault. Add an entry labeled "GitHub PAT".')
+    const token = await vaultDecrypt(vaultKey, data[0].encrypted_data, data[0].iv, data[0].salt)
+    return token
+  },
+
+  async api(endpoint, method, body) {
+    method = method || 'GET'
+    body = body || null
+    const token = await this.getToken()
+    const res = await fetch('https://api.github.com' + endpoint, {
+      method: method,
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: body ? JSON.stringify(body) : null
+    })
+    const data = await res.json()
+    if (!res.ok && res.status !== 409) throw new Error('GitHub API error: ' + data.message)
+    return { status: res.status, data: data }
+  },
+
+  async createRepo(name, description) {
+    description = description || ''
+    const result = await this.api('/orgs/' + this.org + '/repos', 'POST', {
+      name: name,
+      description: description,
+      auto_init: true,
+      private: false
+    })
+    console.log('Repo created: ' + result.data.html_url)
+    return result.data
+  },
+
+  async pushFiles(repo, files, message) {
+    message = message || 'Deploy via Back Brain'
+    var ref = await this.api('/repos/' + this.org + '/' + repo + '/git/ref/heads/main')
+    var latestSha = ref.data.object.sha
+    var commit = await this.api('/repos/' + this.org + '/' + repo + '/git/commits/' + latestSha)
+    var baseTree = commit.data.tree.sha
+    var tree = []
+    for (var i = 0; i < files.length; i++) {
+      var blob = await this.api('/repos/' + this.org + '/' + repo + '/git/blobs', 'POST', {
+        content: files[i].content,
+        encoding: 'utf-8'
+      })
+      tree.push({ path: files[i].path, mode: '100644', type: 'blob', sha: blob.data.sha })
+    }
+    var newTree = await this.api('/repos/' + this.org + '/' + repo + '/git/trees', 'POST', {
+      base_tree: baseTree,
+      tree: tree
+    })
+    var newCommit = await this.api('/repos/' + this.org + '/' + repo + '/git/commits', 'POST', {
+      message: message,
+      tree: newTree.data.sha,
+      parents: [latestSha]
+    })
+    await this.api('/repos/' + this.org + '/' + repo + '/git/refs/heads/main', 'PATCH', {
+      sha: newCommit.data.sha
+    })
+    console.log('Pushed ' + files.length + ' file(s) to ' + repo)
+    return newCommit.data
+  },
+
+  async enablePages(repo) {
+    await this.api('/repos/' + this.org + '/' + repo + '/pages', 'POST', {
+      source: { branch: 'main', path: '/' }
+    })
+    var url = 'https://' + this.org + '.github.io/' + repo + '/'
+    console.log('Pages live at: ' + url)
+    return url
+  },
+
+  async deploy(name, files, description) {
+    description = description || ''
+    var slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')
+    console.log('Deploying "' + name + '" as ' + slug + '...')
+    await this.createRepo(slug, description)
+    await new Promise(function(r) { setTimeout(r, 2000) })
+    await this.pushFiles(slug, files)
+    var url = await this.enablePages(slug)
+    console.log('LIVE: ' + url)
+    return url
+  },
+
+  async test() {
+    try {
+      var result = await this.api('/orgs/' + this.org)
+      console.log('Connected to ' + result.data.login + ' — ' + result.data.public_repos + ' repos')
+      return true
+    } catch (e) {
+      console.error(e.message)
+      return false
+    }
+  }
+}
+
+window.GitHub = GitHub
 
 // ====== VAULT UI ======
 $('vault-btn').onclick = () => $('vault-panel').classList.toggle('open')
@@ -446,9 +552,10 @@ async function showChat() {
     if (webSearchAvailable) status.push('web search ready')
     const active = PROVIDERS.filter(p => p.key).length
     status.push(active + ' AI providers')
+    status.push('GitHub API ready')
     addMsg('system', status.join(' / '))
   } else {
-    addMsg('bot', 'Back Brain online. ' + knowledgeBase.length + ' memories loaded.' + (latestGrounding ? ' Grounding active.' : '') + ' What do you need?')
+    addMsg('bot', 'Back Brain online. ' + knowledgeBase.length + ' memories loaded.' + (latestGrounding ? ' Grounding active.' : '') + ' GitHub API ready. What do you need?')
   }
 }
 

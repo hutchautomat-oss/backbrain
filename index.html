@@ -135,8 +135,7 @@ const VAULT_CHECK_NAME = '__vault_check__'
 const VAULT_CHECK_VALUE = 'backbrain_vault_ok'
 
 // ====== PROVIDER ROTATION ======
-// Sign up free at each site, paste your key, done.
-// Works with just Groq alone — each new key adds a fallback lane.
+// Groq → Cerebras → OpenRouter. If one rate limits, next one catches it.
 const PROVIDERS = [
   {
     name: 'Groq',
@@ -145,21 +144,15 @@ const PROVIDERS = [
     model: 'llama-3.3-70b-versatile'
   },
   {
-    name: 'Together',
-    url: 'https://api.together.xyz/v1/chat/completions',
-    key: '',  // Get free key: together.ai
-    model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo'
-  },
-  {
     name: 'Cerebras',
     url: 'https://api.cerebras.ai/v1/chat/completions',
-    key: 'csk-465dvtmk34vwh34wmwp2nk5m6j353j2jmycyp4yym9482pey',  // Get free key: cerebras.ai
+    key: 'csk-465dvtmk34vwh34wmwp2nk5m6j353j2jmycyp4yym9482pey',
     model: 'llama-3.3-70b'
   },
   {
     name: 'OpenRouter',
     url: 'https://openrouter.ai/api/v1/chat/completions',
-    key: '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',  // Get free key: openrouter.ai
+    key: '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',
     model: 'meta-llama/llama-3.3-70b-instruct:free'
   }
 ]
@@ -492,7 +485,6 @@ async function saveKnowledge(sourceType, sourceName, content) {
 
 // ====== LLM WITH PROVIDER ROTATION ======
 async function callLLM(messages, model) {
-  // Vision calls go direct to Groq (only provider with vision model)
   if (model) {
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -503,7 +495,6 @@ async function callLLM(messages, model) {
     return data.choices?.[0]?.message?.content || 'Error: ' + JSON.stringify(data.error || data)
   }
 
-  // Text calls rotate through all available providers
   for (const p of PROVIDERS) {
     if (!p.key) continue
     try {
@@ -550,7 +541,7 @@ async function shouldSearch(userMessage) {
   try {
     const knowledgeTopics = knowledgeBase.length > 0 ? knowledgeBase.map(k => k.source_name).join(', ') : 'none'
     const result = await callLLM([
-      { role: 'system', content: 'You decide if a web search is needed. Respond with ONLY valid JSON, nothing else.\nFormat: {"search": true, "query": "search terms"} or {"search": false}\n\nSearch when: current events, specific facts not in stored knowledge, URLs, products, people, prices, technical specs.\nDo NOT search when: the user is chatting, asking about their own files, or the answer is clearly in stored knowledge.' },
+      { role: 'system', content: 'You decide if a web search is needed. Respond with ONLY valid JSON, nothing else.\nFormat: {"search": true, "query": "search terms"} or {"search": false}\n\nSearch when: current events, specific facts not in stored knowledge, URLs, products, companies, people, prices, technical specs.\nDo NOT search when: the user is chatting, asking about their own files, or the answer is clearly in stored knowledge.' },
       { role: 'user', content: 'Stored knowledge topics: ' + knowledgeTopics + '\n\nUser says: ' + userMessage }
     ])
     const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
@@ -642,7 +633,6 @@ async function send() {
   try {
     let reply
 
-    // ====== /build COMMAND — ARCHITECT MODE ======
     if (userText.startsWith('/build ')) {
       const buildRequest = userText.substring(7).trim()
       dots.textContent = 'Architecting...'
@@ -673,7 +663,6 @@ async function send() {
       await saveKnowledge('spec', buildRequest, reply)
       addMsg('system', 'App spec saved to memory')
 
-    // ====== IMAGE HANDLING ======
     } else if (hasImage) {
       const path = currentUser.id + '/' + Date.now() + '_' + pendingImage.name
       await sb.storage.from('user-files').upload(path, pendingImage.file)
@@ -691,7 +680,6 @@ async function send() {
       pendingImage = null
       $('pending-file').style.display = 'none'
 
-    // ====== NORMAL CHAT ======
     } else {
       dots.textContent = 'Thinking...'
       const searchDecision = await shouldSearch(userText)

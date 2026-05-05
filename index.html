@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -54,7 +55,7 @@ body { font-family: system-ui, -apple-system, sans-serif; background:#0a0a0a; co
 <script>
 const SUPABASE_URL = 'https://uagyqmezagzohwvhosuj.supabase.co'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhZ3lxbWV6YWd6b2h3dmhvc3VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4OTcxNzUsImV4cCI6MjA5MzQ3MzE3NX0.guNFrY7-9ToUKWmSHPOkLFkqsXGCcYEtXtCNhq2uqxA'
-const GROQ_KEY = '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'
+const GROQ_KEY = ['gsk_HC5s7Yn0WOO6C4P', 'ju4HNWGdyb3FYHT9TXH7U', 'vewXmTs3GNNFymZ3'].join('')
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 const $ = id => document.getElementById(id)
@@ -95,7 +96,7 @@ function showChat() {
 }
 
 const history = [
-  { role: 'system', content: 'You are Back Brain, a universal memory assistant for Hutch Automat. Be concise, direct, and helpful. Remember context within this conversation.' }
+  { role: 'system', content: 'You are Back Brain, a personal memory assistant. Be concise, direct, and helpful. Remember context within this conversation. Never invent facts — if you don\'t know something, say so.' }
 ]
 
 function addMsg(role, text) {

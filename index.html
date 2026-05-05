@@ -128,12 +128,41 @@ const SUPABASE_URL = 'https://uagyqmezagzohwvhosuj.supabase.co'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhZ3lxbWV6YWd6b2h3dmhvc3VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4OTcxNzUsImV4cCI6MjA5MzQ3MzE3NX0.guNFrY7-9ToUKWmSHPOkLFkqsXGCcYEtXtCNhq2uqxA'
 const GROQ_KEY = ['gsk_HC5s7Yn0WOO6C4P', 'ju4HNWGdyb3FYHT9TXH7U', 'vewXmTs3GNNFymZ3'].join('')
 const BRAVE_KEY = 'BSAqWVfYKZuGVnmrWePSvetv5H9gMHl'
-const TEXT_MODEL = 'llama-3.3-70b-versatile'
 const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 const WHISPER_MODEL = 'whisper-large-v3'
 const GROUNDING_INTERVAL = 10
 const VAULT_CHECK_NAME = '__vault_check__'
 const VAULT_CHECK_VALUE = 'backbrain_vault_ok'
+
+// ====== PROVIDER ROTATION ======
+// Sign up free at each site, paste your key, done.
+// Works with just Groq alone — each new key adds a fallback lane.
+const PROVIDERS = [
+  {
+    name: 'Groq',
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    key: GROQ_KEY,
+    model: 'llama-3.3-70b-versatile'
+  },
+  {
+    name: 'Together',
+    url: 'https://api.together.xyz/v1/chat/completions',
+    key: '',  // Get free key: together.ai
+    model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo'
+  },
+  {
+    name: 'Cerebras',
+    url: 'https://api.cerebras.ai/v1/chat/completions',
+    key: '',  // Get free key: cerebras.ai
+    model: 'llama-3.3-70b'
+  },
+  {
+    name: 'OpenRouter',
+    url: 'https://openrouter.ai/api/v1/chat/completions',
+    key: '',  // Get free key: openrouter.ai
+    model: 'meta-llama/llama-3.3-70b-instruct:free'
+  }
+]
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 const $ = id => document.getElementById(id)
@@ -422,6 +451,8 @@ async function showChat() {
     status.push(saved.length + ' messages')
     if (latestGrounding) status.push('grounding active')
     if (webSearchAvailable) status.push('web search ready')
+    const active = PROVIDERS.filter(p => p.key).length
+    status.push(active + ' AI providers')
     addMsg('system', status.join(' / '))
   } else {
     addMsg('bot', 'Back Brain online. ' + knowledgeBase.length + ' memories loaded.' + (latestGrounding ? ' Grounding active.' : '') + ' What do you need?')
@@ -459,15 +490,41 @@ async function saveKnowledge(sourceType, sourceName, content) {
   history[0] = { role: 'system', content: buildSystemPrompt() }
 }
 
-// ====== LLM ======
+// ====== LLM WITH PROVIDER ROTATION ======
 async function callLLM(messages, model) {
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEY },
-    body: JSON.stringify({ model: model || TEXT_MODEL, messages })
-  })
-  const data = await res.json()
-  return data.choices?.[0]?.message?.content || 'Error: ' + JSON.stringify(data.error || data)
+  // Vision calls go direct to Groq (only provider with vision model)
+  if (model) {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEY },
+      body: JSON.stringify({ model, messages })
+    })
+    const data = await res.json()
+    return data.choices?.[0]?.message?.content || 'Error: ' + JSON.stringify(data.error || data)
+  }
+
+  // Text calls rotate through all available providers
+  for (const p of PROVIDERS) {
+    if (!p.key) continue
+    try {
+      const res = await fetch(p.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key },
+        body: JSON.stringify({ model: p.model, messages })
+      })
+      if (res.status === 429) {
+        addMsg('system', p.name + ' busy, switching...')
+        continue
+      }
+      const data = await res.json()
+      const content = data.choices?.[0]?.message?.content
+      if (content) return content
+      continue
+    } catch {
+      continue
+    }
+  }
+  return 'All providers busy. Try again in a minute.'
 }
 
 // ====== WEB SEARCH ======

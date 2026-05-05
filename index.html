@@ -15,7 +15,7 @@ body { font-family: system-ui, -apple-system, sans-serif; background:#0a0a0a; co
 #login button { background:#2563eb; color:#fff; border:none; cursor:pointer; }
 #login button:hover { background:#1d4ed8; }
 #login .subtle { color:#888; font-size:0.85rem; }
-#chat { display:none; flex-direction:column; height:100vh; }
+#chat { display:none; flex-direction:column; height:100vh; position:relative; }
 #header { padding:12px 16px; border-bottom:1px solid #222; display:flex; justify-content:space-between; align-items:center; gap:8px; }
 #header h1 { font-size:1.1rem; color:#fff; }
 #header .hdr-btns { display:flex; gap:6px; }
@@ -40,6 +40,31 @@ body { font-family: system-ui, -apple-system, sans-serif; background:#0a0a0a; co
 #pending-file { padding:6px 16px; font-size:0.8rem; color:#4ade80; border-top:1px solid #222; display:none; align-items:center; gap:8px; }
 #pending-file .cancel { color:#888; cursor:pointer; }
 #pending-file .cancel:hover { color:#dc2626; }
+#vault-panel { display:none; position:absolute; top:0; left:0; right:0; bottom:0; background:#0a0a0a; z-index:10; flex-direction:column; overflow-y:auto; }
+#vault-panel.open { display:flex; }
+#vault-top { padding:16px; border-bottom:1px solid #222; display:flex; justify-content:space-between; align-items:center; }
+#vault-top h2 { color:#fff; font-size:1.1rem; }
+#vault-close { background:none; border:none; color:#888; font-size:1.3rem; cursor:pointer; padding:4px 8px; }
+#vault-close:hover { color:#fff; }
+#vault-body { flex:1; padding:16px; display:flex; flex-direction:column; gap:12px; }
+#vault-body input { padding:10px; border-radius:6px; border:1px solid #333; background:#1a1a1a; color:#fff; font-size:0.95rem; width:100%; }
+#vault-body button { padding:10px; border-radius:6px; border:none; cursor:pointer; font-size:0.95rem; }
+.vault-primary-btn { background:#2563eb; color:#fff; }
+.vault-primary-btn:hover { background:#1d4ed8; }
+.vault-secondary-btn { background:#1e1e1e; color:#aaa; border:1px solid #333 !important; }
+.vault-secondary-btn:hover { color:#fff; border-color:#2563eb !important; }
+.vault-warn { color:#f59e0b; font-size:0.8rem; margin-top:4px; }
+.vault-err { color:#dc2626; font-size:0.85rem; }
+#vault-entries { display:flex; flex-direction:column; gap:8px; }
+.ve { background:#1a1a1a; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; }
+.ve-row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.ve-name { color:#fff; font-weight:600; font-size:0.95rem; }
+.ve-secret { font-family:monospace; font-size:0.85rem; color:#4ade80; word-break:break-all; padding:6px 8px; background:#111; border-radius:4px; display:none; }
+.ve-actions { display:flex; gap:6px; }
+.ve-actions button { background:none; border:1px solid #444; color:#aaa; padding:4px 10px; border-radius:4px; cursor:pointer; font-size:0.8rem; }
+.ve-actions button:hover { border-color:#2563eb; color:#fff; }
+.ve-actions .del:hover { border-color:#dc2626; color:#dc2626; }
+#vault-add { display:flex; flex-direction:column; gap:8px; margin-top:8px; padding-top:12px; border-top:1px solid #222; }
 </style>
 </head>
 <body>
@@ -57,6 +82,7 @@ body { font-family: system-ui, -apple-system, sans-serif; background:#0a0a0a; co
   <div id="header">
     <h1>Back Brain</h1>
     <div class="hdr-btns">
+      <button id="vault-btn">🔒</button>
       <button id="knowledge-btn">Memory</button>
       <button id="ground-btn">Ground</button>
       <button id="logout">Sign Out</button>
@@ -71,6 +97,30 @@ body { font-family: system-ui, -apple-system, sans-serif; background:#0a0a0a; co
     <input type="text" id="msg-input" placeholder="Ask Back Brain..." />
     <button id="send-btn">Send</button>
   </div>
+
+  <div id="vault-panel">
+    <div id="vault-top">
+      <h2>🔒 Vault</h2>
+      <button id="vault-close">✕</button>
+    </div>
+    <div id="vault-body">
+      <div id="vault-locked">
+        <input type="password" id="master-pw" placeholder="Master password" />
+        <button class="vault-primary-btn" id="vault-unlock">Unlock</button>
+        <div class="vault-warn">Never stored anywhere. If you forget it, your secrets are gone forever.</div>
+        <div class="vault-err" id="vault-err" style="display:none"></div>
+      </div>
+      <div id="vault-unlocked" style="display:none">
+        <div id="vault-entries"></div>
+        <div id="vault-add">
+          <input type="text" id="vault-add-name" placeholder="Label (e.g. Gmail, API key)" />
+          <input type="password" id="vault-add-secret" placeholder="Secret value" />
+          <button class="vault-primary-btn" id="vault-save">Add Entry</button>
+        </div>
+        <button class="vault-secondary-btn" id="vault-lock" style="margin-top:12px">Lock Vault</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -82,6 +132,8 @@ const TEXT_MODEL = 'llama-3.3-70b-versatile'
 const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 const WHISPER_MODEL = 'whisper-large-v3'
 const GROUNDING_INTERVAL = 10
+const VAULT_CHECK_NAME = '__vault_check__'
+const VAULT_CHECK_VALUE = 'backbrain_vault_ok'
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 const $ = id => document.getElementById(id)
@@ -93,8 +145,143 @@ let knowledgeBase = []
 let latestGrounding = null
 let sessionMsgCount = 0
 let webSearchAvailable = true
+let vaultKey = null
 
-// -- Auth --
+// ====== CRYPTO (AES-256-GCM + PBKDF2) ======
+function b64Encode(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))) }
+function b64Decode(str) { return Uint8Array.from(atob(str), c => c.charCodeAt(0)) }
+
+async function deriveKey(password, salt) {
+  const enc = new TextEncoder()
+  const material = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey'])
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+    material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+  )
+}
+
+async function vaultEncrypt(password, plaintext) {
+  const salt = crypto.getRandomValues(new Uint8Array(16))
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const key = await deriveKey(password, salt)
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext))
+  return { encrypted_data: b64Encode(encrypted), iv: b64Encode(iv), salt: b64Encode(salt) }
+}
+
+async function vaultDecrypt(password, encrypted_data, iv, salt) {
+  const key = await deriveKey(password, b64Decode(salt))
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64Decode(iv) }, key, b64Decode(encrypted_data))
+  return new TextDecoder().decode(decrypted)
+}
+
+// ====== VAULT UI ======
+$('vault-btn').onclick = () => $('vault-panel').classList.toggle('open')
+$('vault-close').onclick = () => $('vault-panel').classList.remove('open')
+
+$('vault-unlock').onclick = async () => {
+  const pw = $('master-pw').value
+  if (!pw) return
+  $('vault-err').style.display = 'none'
+
+  const { data: checks } = await sb.from('vault').select('*').eq('name', VAULT_CHECK_NAME).limit(1)
+  if (checks && checks.length > 0) {
+    try {
+      const result = await vaultDecrypt(pw, checks[0].encrypted_data, checks[0].iv, checks[0].salt)
+      if (result !== VAULT_CHECK_VALUE) throw new Error('bad')
+    } catch {
+      $('vault-err').textContent = 'Wrong password.'
+      $('vault-err').style.display = 'block'
+      return
+    }
+  } else {
+    const enc = await vaultEncrypt(pw, VAULT_CHECK_VALUE)
+    await sb.from('vault').insert({ user_id: currentUser.id, name: VAULT_CHECK_NAME, ...enc })
+  }
+
+  vaultKey = pw
+  $('master-pw').value = ''
+  $('vault-locked').style.display = 'none'
+  $('vault-unlocked').style.display = 'flex'
+  await loadVaultEntries()
+}
+
+$('vault-lock').onclick = () => {
+  vaultKey = null
+  $('vault-unlocked').style.display = 'none'
+  $('vault-locked').style.display = 'flex'
+  $('vault-entries').innerHTML = ''
+}
+
+$('vault-save').onclick = async () => {
+  const name = $('vault-add-name').value.trim()
+  const secret = $('vault-add-secret').value
+  if (!name || !secret || !vaultKey) return
+
+  const enc = await vaultEncrypt(vaultKey, secret)
+  await sb.from('vault').insert({ user_id: currentUser.id, name, ...enc })
+  $('vault-add-name').value = ''
+  $('vault-add-secret').value = ''
+  await loadVaultEntries()
+}
+
+$('master-pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('vault-unlock').click() })
+
+async function loadVaultEntries() {
+  const { data } = await sb.from('vault').select('*').neq('name', VAULT_CHECK_NAME).order('created_at', { ascending: true })
+  const container = $('vault-entries')
+  container.innerHTML = ''
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div style="color:#555;font-size:0.85rem;text-align:center;padding:20px">No secrets stored yet.</div>'
+    return
+  }
+  data.forEach(entry => {
+    const div = document.createElement('div')
+    div.className = 've'
+    div.innerHTML = `
+      <div class="ve-row">
+        <span class="ve-name">${entry.name}</span>
+        <div class="ve-actions">
+          <button class="reveal" data-id="${entry.id}">show</button>
+          <button class="copy" data-id="${entry.id}">copy</button>
+          <button class="del" data-id="${entry.id}">✕</button>
+        </div>
+      </div>
+      <div class="ve-secret" id="vs-${entry.id}">••••••••</div>
+    `
+    div.querySelector('.reveal').onclick = async function() {
+      const secretEl = $('vs-' + entry.id)
+      if (secretEl.style.display === 'block') {
+        secretEl.style.display = 'none'
+        secretEl.textContent = '••••••••'
+        this.textContent = 'show'
+        return
+      }
+      try {
+        const plain = await vaultDecrypt(vaultKey, entry.encrypted_data, entry.iv, entry.salt)
+        secretEl.textContent = plain
+        secretEl.style.display = 'block'
+        this.textContent = 'hide'
+      } catch { secretEl.textContent = 'Decrypt failed'; secretEl.style.display = 'block' }
+    }
+    div.querySelector('.copy').onclick = async () => {
+      try {
+        const plain = await vaultDecrypt(vaultKey, entry.encrypted_data, entry.iv, entry.salt)
+        await navigator.clipboard.writeText(plain)
+        const btn = div.querySelector('.copy')
+        btn.textContent = '✓'
+        setTimeout(() => btn.textContent = 'copy', 1500)
+      } catch { /* silent */ }
+    }
+    div.querySelector('.del').onclick = async () => {
+      if (!confirm('Delete "' + entry.name + '"?')) return
+      await sb.from('vault').delete().eq('id', entry.id)
+      await loadVaultEntries()
+    }
+    container.appendChild(div)
+  })
+}
+
+// ====== AUTH ======
 $('send-otp').onclick = async () => {
   const email = $('email').value.trim()
   if (!email) return
@@ -118,12 +305,12 @@ $('verify-otp').onclick = async () => {
   showChat()
 }
 
-$('logout').onclick = async () => { await sb.auth.signOut(); location.reload() }
+$('logout').onclick = async () => { vaultKey = null; await sb.auth.signOut(); location.reload() }
 sb.auth.getSession().then(({ data: { session } }) => {
   if (session) { currentUser = session.user; showChat() }
 })
 
-// -- System Identity --
+// ====== SYSTEM PROMPT ======
 const SELF_AWARE_PROMPT = `You are Back Brain — a personal knowledge engine with persistent memory, web access, and self-grounding.
 
 YOUR ABILITIES:
@@ -155,18 +342,14 @@ GROUNDING AWARENESS:
 - If your context feels thin or contradictory, say so. Suggest the user trigger a grounding cycle.
 - After grounding, you are sharper — not because you forgot, but because you consolidated.`
 
-// -- Chat Setup --
+// ====== CHAT SETUP ======
 const history = []
 
 function buildSystemPrompt() {
   let prompt = SELF_AWARE_PROMPT + '\n\n'
-
   if (latestGrounding) {
-    prompt += '== GROUNDING DOCUMENT (your consolidated understanding) ==\n'
-    prompt += latestGrounding + '\n'
-    prompt += '== END GROUNDING ==\n\n'
+    prompt += '== GROUNDING DOCUMENT (your consolidated understanding) ==\n' + latestGrounding + '\n== END GROUNDING ==\n\n'
   }
-
   if (knowledgeBase.length > 0) {
     prompt += '== STORED KNOWLEDGE (' + knowledgeBase.length + ' entries) ==\n\n'
     const entries = latestGrounding ? knowledgeBase.slice(-15) : knowledgeBase
@@ -179,7 +362,6 @@ function buildSystemPrompt() {
   } else {
     prompt += 'No stored knowledge yet.\n'
   }
-
   return prompt
 }
 
@@ -187,28 +369,18 @@ async function showChat() {
   $('login').style.display = 'none'
   $('chat').style.display = 'flex'
   $('msg-input').focus()
-
   addMsg('system', 'Loading memory...')
 
-  const { data: knowledge } = await sb.from('knowledge')
-    .select('*')
-    .order('created_at', { ascending: true })
+  const { data: knowledge } = await sb.from('knowledge').select('*').order('created_at', { ascending: true })
   knowledgeBase = knowledge || []
 
-  const { data: groundingDocs } = await sb.from('grounding_docs')
-    .select('content, message_count, created_at')
-    .order('created_at', { ascending: false })
-    .limit(1)
+  const { data: groundingDocs } = await sb.from('grounding_docs').select('content, message_count, created_at').order('created_at', { ascending: false }).limit(1)
   latestGrounding = groundingDocs?.[0]?.content || null
 
   history.length = 0
   history.push({ role: 'system', content: buildSystemPrompt() })
 
-  const { data: saved } = await sb.from('messages')
-    .select('role, content, created_at')
-    .order('created_at', { ascending: true })
-    .limit(100)
-
+  const { data: saved } = await sb.from('messages').select('role, content, created_at').order('created_at', { ascending: true }).limit(100)
   $('messages').innerHTML = ''
 
   if (saved && saved.length > 0) {
@@ -227,7 +399,7 @@ async function showChat() {
   }
 }
 
-// -- Messages --
+// ====== MESSAGES ======
 function addMsg(role, text) {
   const d = document.createElement('div')
   d.className = 'msg ' + (role === 'user' ? 'user' : role === 'system' ? 'system-msg' : 'bot')
@@ -253,17 +425,12 @@ async function saveMsg(role, content) {
 }
 
 async function saveKnowledge(sourceType, sourceName, content) {
-  await sb.from('knowledge').insert({
-    user_id: currentUser.id,
-    source_type: sourceType,
-    source_name: sourceName,
-    content: content
-  })
+  await sb.from('knowledge').insert({ user_id: currentUser.id, source_type: sourceType, source_name: sourceName, content })
   knowledgeBase.push({ source_type: sourceType, source_name: sourceName, content, created_at: new Date().toISOString() })
   history[0] = { role: 'system', content: buildSystemPrompt() }
 }
 
-// -- LLM --
+// ====== LLM ======
 async function callLLM(messages, model) {
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -274,7 +441,7 @@ async function callLLM(messages, model) {
   return data.choices?.[0]?.message?.content || 'Error: ' + JSON.stringify(data.error || data)
 }
 
-// -- Web Search --
+// ====== WEB SEARCH ======
 async function braveSearch(query) {
   try {
     const res = await fetch('https://api.search.brave.com/res/v1/web/search?q=' + encodeURIComponent(query) + '&count=5', {
@@ -295,31 +462,24 @@ async function braveSearch(query) {
 async function shouldSearch(userMessage) {
   if (!webSearchAvailable) return { search: false }
   try {
-    const knowledgeTopics = knowledgeBase.length > 0
-      ? knowledgeBase.map(k => k.source_name).join(', ')
-      : 'none'
+    const knowledgeTopics = knowledgeBase.length > 0 ? knowledgeBase.map(k => k.source_name).join(', ') : 'none'
     const result = await callLLM([
-      { role: 'system', content: 'You decide if a web search is needed. Respond with ONLY valid JSON, nothing else.\nFormat: {"search": true, "query": "search terms"} or {"search": false}\n\nSearch when: current events, specific facts not in stored knowledge, URLs, products, people, prices, technical specs, anything where guessing would be wrong.\nDo NOT search when: the user is chatting, asking about their own files, or the answer is clearly in stored knowledge.' },
+      { role: 'system', content: 'You decide if a web search is needed. Respond with ONLY valid JSON, nothing else.\nFormat: {"search": true, "query": "search terms"} or {"search": false}\n\nSearch when: current events, specific facts not in stored knowledge, URLs, products, people, prices, technical specs.\nDo NOT search when: the user is chatting, asking about their own files, or the answer is clearly in stored knowledge.' },
       { role: 'user', content: 'Stored knowledge topics: ' + knowledgeTopics + '\n\nUser says: ' + userMessage }
     ])
     const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
     return JSON.parse(cleaned)
-  } catch {
-    return { search: false }
-  }
+  } catch { return { search: false } }
 }
 
-// -- Grounding --
+// ====== GROUNDING ======
 async function runGrounding() {
   addMsg('system', 'Grounding in progress...')
-
   const knowledgeDump = knowledgeBase.map(k => {
     const date = new Date(k.created_at).toLocaleDateString()
     return '[' + k.source_type.toUpperCase() + '] ' + k.source_name + ' (' + date + '):\n' + k.content
   }).join('\n\n---\n\n')
-
   const recentChat = history.slice(-30).filter(h => h.role !== 'system').map(h => h.role + ': ' + h.content).join('\n')
-
   const groundingPrompt = `Review everything below. Create a GROUNDING DOCUMENT — Back Brain's consolidated understanding.
 
 STRUCTURE:
@@ -347,31 +507,21 @@ ${recentChat}`
     { role: 'system', content: 'You create grounding documents. Be thorough, factual, and organized.' },
     { role: 'user', content: groundingPrompt }
   ])
-
-  await sb.from('grounding_docs').insert({
-    user_id: currentUser.id,
-    content: doc,
-    message_count: knowledgeBase.length
-  })
-
+  await sb.from('grounding_docs').insert({ user_id: currentUser.id, content: doc, message_count: knowledgeBase.length })
   latestGrounding = doc
   history[0] = { role: 'system', content: buildSystemPrompt() }
   sessionMsgCount = 0
-
   addMsg('system', 'Grounding complete. Context consolidated.')
   return doc
 }
 
 async function maybeAutoGround() {
   sessionMsgCount++
-  if (sessionMsgCount >= GROUNDING_INTERVAL) {
-    await runGrounding()
-  }
+  if (sessionMsgCount >= GROUNDING_INTERVAL) await runGrounding()
 }
 
-// -- Deep Analysis Prompts --
+// ====== ANALYSIS PROMPTS ======
 const DEEP_IMAGE_PROMPT = `Conduct a thorough visual analysis. Cover ALL:
-
 1. OBJECTS AND SUBJECTS: Everything visible — people, items, text, logos, symbols, tools, food, furniture.
 2. TEXT AND WRITING: Any visible text, labels, signs, handwriting — transcribe exactly.
 3. SPATIAL LAYOUT: Arrangement, foreground, background, relationships between elements.
@@ -379,99 +529,73 @@ const DEEP_IMAGE_PROMPT = `Conduct a thorough visual analysis. Cover ALL:
 5. CONTEXT AND MEANING: What is this image about? What was it taken for?
 6. DETAILS OTHERS WOULD MISS: Corners, reflections, timestamps, wear, anything unusual.
 7. CONNECTIONS: How might this relate to the user's known projects or interests?
-
 Do not skim. Scan the entire image systematically.`
 
 function buildFileAnalysisPrompt(fileName, fileContent) {
-  return `File uploaded: "${fileName}"\n\nContent:\n---\n${fileContent}\n---\n\nAnalyze thoroughly:\n1. STRUCTURE: What kind of document? How organized?\n2. KEY CONTENT: Most important facts, data, ideas.\n3. DETAILS: Names, numbers, dates, URLs, code, formulas.\n4. THEMES: Patterns, recurring ideas.\n5. CONNECTIONS: How does this relate to user's other projects?\n6. ACTIONABLE: Anything to act on, remember, follow up?\n\nRead the whole thing. Do not skim.`
+  return `File uploaded: "${fileName}"\n\nContent:\n---\n${fileContent}\n---\n\nAnalyze thoroughly:\n1. STRUCTURE: What kind of document?\n2. KEY CONTENT: Most important facts, data, ideas.\n3. DETAILS: Names, numbers, dates, URLs, code.\n4. THEMES: Patterns, recurring ideas.\n5. CONNECTIONS: How does this relate to user's other projects?\n6. ACTIONABLE: Anything to act on or follow up?`
 }
 
 function buildAudioAnalysisPrompt(fileName, transcript) {
-  return `Audio file: "${fileName}"\n\nTranscript:\n---\n${transcript}\n---\n\nAnalyze:\n1. KEY POINTS: Main ideas or statements.\n2. DECISIONS AND ACTION ITEMS: Anything decided, promised, planned.\n3. NAMES AND REFERENCES: People, places, projects, products.\n4. TONE AND CONTEXT: Meeting, brainstorm, voice memo? Mood?\n5. SUBTEXT: What is implied but not said?\n6. CONNECTIONS: How does this relate to user's other work?\n\nExtract meaning, not echo.`
+  return `Audio file: "${fileName}"\n\nTranscript:\n---\n${transcript}\n---\n\nAnalyze:\n1. KEY POINTS: Main ideas.\n2. DECISIONS AND ACTION ITEMS.\n3. NAMES AND REFERENCES.\n4. TONE AND CONTEXT.\n5. SUBTEXT: What is implied?\n6. CONNECTIONS to user's other work.`
 }
 
-// -- Send Message --
+// ====== SEND MESSAGE ======
 async function send() {
   const text = $('msg-input').value.trim()
   if (!text && !pendingImage) return
   $('msg-input').value = ''
-
   const hasImage = !!pendingImage
   const userText = text || 'Scan this image thoroughly.'
-
   if (hasImage) addImgMsg(pendingImage.base64)
   addMsg('user', userText)
-
   const dots = addMsg('bot', '...')
 
   try {
     let reply
-
     if (hasImage) {
       const path = currentUser.id + '/' + Date.now() + '_' + pendingImage.name
       await sb.storage.from('user-files').upload(path, pendingImage.file)
-
       const imagePrompt = DEEP_IMAGE_PROMPT + '\n\nThe user says: "' + userText + '"'
-      const messages = [...history, {
-        role: 'user',
-        content: [
-          { type: 'text', text: imagePrompt },
-          { type: 'image_url', image_url: { url: pendingImage.base64 } }
-        ]
-      }]
-
+      const messages = [...history, { role: 'user', content: [{ type: 'text', text: imagePrompt }, { type: 'image_url', image_url: { url: pendingImage.base64 } }] }]
       const savedText = '[Image: ' + pendingImage.name + '] ' + userText
       history.push({ role: 'user', content: savedText })
       await saveMsg('user', savedText)
-
       reply = await callLLM(messages, VISION_MODEL)
       dots.textContent = reply
       history.push({ role: 'assistant', content: reply })
       await saveMsg('assistant', reply)
-
       await saveKnowledge('image', pendingImage.name, reply)
       addMsg('system', 'Deep image analysis saved to memory')
-
       pendingImage = null
       $('pending-file').style.display = 'none'
     } else {
       dots.textContent = 'Thinking...'
       const searchDecision = await shouldSearch(userText)
-
       let webContext = ''
       if (searchDecision.search && searchDecision.query) {
         dots.textContent = 'Searching: ' + searchDecision.query + '...'
         addMsg('system', 'Searching web: ' + searchDecision.query)
         const results = await braveSearch(searchDecision.query)
         if (results) {
-          webContext = '\n\n== WEB SEARCH RESULTS for "' + searchDecision.query + '" ==\n' + results + '\n== END SEARCH ==\n\nSynthesize your answer using web results + stored knowledge + conversation. Cite sources with [memory], [web], or [conversation].'
+          webContext = '\n\n== WEB SEARCH RESULTS for "' + searchDecision.query + '" ==\n' + results + '\n== END SEARCH ==\n\nSynthesize using web results + stored knowledge + conversation. Cite sources with [memory], [web], or [conversation].'
         } else if (!webSearchAvailable) {
           addMsg('system', 'Web search unavailable (CORS). Answering from memory only.')
         }
       }
-
       history.push({ role: 'user', content: userText })
       await saveMsg('user', userText)
-
       const answerMessages = [...history]
-      if (webContext) {
-        answerMessages.push({ role: 'system', content: webContext })
-      }
-
+      if (webContext) answerMessages.push({ role: 'system', content: webContext })
       reply = await callLLM(answerMessages)
       dots.textContent = reply
       history.push({ role: 'assistant', content: reply })
       await saveMsg('assistant', reply)
     }
-
     await maybeAutoGround()
-
-  } catch (e) {
-    dots.textContent = 'Error: ' + e.message
-  }
+  } catch (e) { dots.textContent = 'Error: ' + e.message }
 }
 
-// -- File Upload --
+// ====== FILE UPLOAD ======
 $('file-btn').onclick = () => $('file-input').click()
 $('cancel-pending').onclick = () => { pendingImage = null; $('pending-file').style.display = 'none' }
 
@@ -492,70 +616,46 @@ $('file-input').onchange = async (e) => {
     $('file-btn').classList.add('processing')
     addMsg('system', 'Processing audio: ' + file.name)
     const dots = addMsg('bot', 'Transcribing...')
-
     const path = currentUser.id + '/' + Date.now() + '_' + file.name
     await sb.storage.from('user-files').upload(path, file)
-
     try {
       const formData = new FormData()
       formData.append('file', file, file.name)
       formData.append('model', WHISPER_MODEL)
-      const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + GROQ_KEY },
-        body: formData
-      })
+      const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { 'Authorization': 'Bearer ' + GROQ_KEY }, body: formData })
       const data = await res.json()
       if (data.text) {
         dots.textContent = 'Transcribed. Analyzing...'
-        const analysisPrompt = buildAudioAnalysisPrompt(file.name, data.text)
-        const analysis = await callLLM([
-          { role: 'system', content: SELF_AWARE_PROMPT },
-          { role: 'user', content: analysisPrompt }
-        ])
+        const analysis = await callLLM([{ role: 'system', content: SELF_AWARE_PROMPT }, { role: 'user', content: buildAudioAnalysisPrompt(file.name, data.text) }])
         dots.textContent = analysis
-        const fullKnowledge = 'TRANSCRIPT:\n' + data.text + '\n\nANALYSIS:\n' + analysis
-        await saveKnowledge('audio', file.name, fullKnowledge)
+        await saveKnowledge('audio', file.name, 'TRANSCRIPT:\n' + data.text + '\n\nANALYSIS:\n' + analysis)
         await saveMsg('assistant', '[Audio: ' + file.name + ']\n' + analysis)
         addMsg('system', 'Audio analysis saved to memory')
-      } else {
-        dots.textContent = 'Transcription failed: ' + JSON.stringify(data.error || data)
-      }
-    } catch (err) {
-      dots.textContent = 'Error: ' + err.message
-    }
+      } else { dots.textContent = 'Transcription failed: ' + JSON.stringify(data.error || data) }
+    } catch (err) { dots.textContent = 'Error: ' + err.message }
     $('file-btn').classList.remove('processing')
   } else {
     $('file-btn').classList.add('processing')
     addMsg('system', 'Processing: ' + file.name)
     const dots = addMsg('bot', 'Reading and analyzing...')
-
     const path = currentUser.id + '/' + Date.now() + '_' + file.name
     await sb.storage.from('user-files').upload(path, file)
-
     try {
       const text = await file.text()
       const content = text.substring(0, 12000)
       dots.textContent = 'Read ' + text.length + ' chars. Analyzing...'
-      const analysisPrompt = buildFileAnalysisPrompt(file.name, content)
-      const analysis = await callLLM([
-        { role: 'system', content: SELF_AWARE_PROMPT },
-        { role: 'user', content: analysisPrompt }
-      ])
+      const analysis = await callLLM([{ role: 'system', content: SELF_AWARE_PROMPT }, { role: 'user', content: buildFileAnalysisPrompt(file.name, content) }])
       dots.textContent = analysis
-      const fullKnowledge = 'SOURCE (' + text.length + ' chars):\n' + content.substring(0, 3000) + '\n\nANALYSIS:\n' + analysis
-      await saveKnowledge('text', file.name, fullKnowledge)
+      await saveKnowledge('text', file.name, 'SOURCE (' + text.length + ' chars):\n' + content.substring(0, 3000) + '\n\nANALYSIS:\n' + analysis)
       await saveMsg('assistant', '[File: ' + file.name + ']\n' + analysis)
       addMsg('system', 'File analysis saved to memory')
-    } catch (err) {
-      dots.textContent = 'Could not read file: ' + err.message
-    }
+    } catch (err) { dots.textContent = 'Could not read file: ' + err.message }
     $('file-btn').classList.remove('processing')
   }
   $('file-input').value = ''
 }
 
-// -- Voice Recording --
+// ====== VOICE RECORDING ======
 $('mic-btn').onclick = async () => {
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop()
@@ -575,17 +675,10 @@ $('mic-btn').onclick = async () => {
         const formData = new FormData()
         formData.append('file', audioBlob, 'voice.webm')
         formData.append('model', WHISPER_MODEL)
-        const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + GROQ_KEY },
-          body: formData
-        })
+        const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { 'Authorization': 'Bearer ' + GROQ_KEY }, body: formData })
         const data = await res.json()
-        if (data.text) {
-          dots.remove()
-          $('msg-input').value = data.text
-          $('msg-input').focus()
-        } else { dots.textContent = 'Could not transcribe.' }
+        if (data.text) { dots.remove(); $('msg-input').value = data.text; $('msg-input').focus() }
+        else { dots.textContent = 'Could not transcribe.' }
       } catch (err) { dots.textContent = 'Error: ' + err.message }
     }
     mediaRecorder.start()
@@ -593,30 +686,21 @@ $('mic-btn').onclick = async () => {
   } catch (e) { addMsg('bot', 'Mic access denied.') }
 }
 
-// -- Knowledge View --
+// ====== KNOWLEDGE VIEW ======
 $('knowledge-btn').onclick = () => {
-  if (knowledgeBase.length === 0) {
-    addMsg('system', 'No memories stored yet.')
-    return
-  }
+  if (knowledgeBase.length === 0) { addMsg('system', 'No memories stored yet.'); return }
   let summary = 'STORED MEMORIES (' + knowledgeBase.length + '):\n\n'
   knowledgeBase.forEach((k, i) => {
     const date = new Date(k.created_at).toLocaleDateString()
     summary += (i + 1) + '. [' + k.source_type.toUpperCase() + '] ' + k.source_name + ' (' + date + ')\n'
     summary += '   ' + k.content.substring(0, 150) + (k.content.length > 150 ? '...' : '') + '\n\n'
   })
-  if (latestGrounding) {
-    summary += '---\nGROUNDING DOC (active):\n' + latestGrounding.substring(0, 500) + '...'
-  }
+  if (latestGrounding) summary += '---\nGROUNDING DOC (active):\n' + latestGrounding.substring(0, 500) + '...'
   addMsg('bot', summary)
 }
 
-// -- Manual Ground Button --
 $('ground-btn').onclick = () => {
-  if (knowledgeBase.length === 0 && history.length <= 1) {
-    addMsg('system', 'Nothing to ground yet.')
-    return
-  }
+  if (knowledgeBase.length === 0 && history.length <= 1) { addMsg('system', 'Nothing to ground yet.'); return }
   runGrounding()
 }
 

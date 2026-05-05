@@ -342,6 +342,35 @@ GROUNDING AWARENESS:
 - If your context feels thin or contradictory, say so. Suggest the user trigger a grounding cycle.
 - After grounding, you are sharper — not because you forgot, but because you consolidated.`
 
+// ====== BUILD SPEC PROMPT ======
+const BUILD_SPEC_PROMPT = `You are now in ARCHITECT MODE. You are not advising. You are DESIGNING an application.
+
+Using everything you know from your grounding document and stored knowledge, generate a complete app specification in valid JSON.
+
+OUTPUT THIS EXACT FORMAT (no markdown, no explanation, just JSON):
+{
+  "app_name": "Name of the app",
+  "purpose": "One sentence — what it does and who it's for",
+  "pages": [
+    {
+      "name": "Page Name",
+      "components": ["list", "of", "ui", "elements"],
+      "interactions": ["what happens when user does X"]
+    }
+  ],
+  "data_model": {
+    "table_name": ["column1", "column2", "column3"]
+  },
+  "style": "visual direction — colors, mood, typography feel",
+  "tech_notes": "any technical considerations from your knowledge"
+}
+
+RULES:
+- Output ONLY valid JSON. No markdown fences. No explanation before or after.
+- Use your C-Suite knowledge to inform decisions (food science, branding, operations — whatever is relevant).
+- Be specific in components and interactions, not vague.
+- The spec should be detailed enough that a developer could build it without asking questions.`
+
 // ====== CHAT SETUP ======
 const history = []
 
@@ -459,17 +488,15 @@ async function braveSearch(query) {
   }
 }
 
-async function shouldSearch(userMessage) {
+function shouldSearch(userMessage) {
   if (!webSearchAvailable) return { search: false }
-  try {
-    const knowledgeTopics = knowledgeBase.length > 0 ? knowledgeBase.map(k => k.source_name).join(', ') : 'none'
-    const result = await callLLM([
-      { role: 'system', content: 'You decide if a web search is needed. Respond with ONLY valid JSON, nothing else.\nFormat: {"search": true, "query": "search terms"} or {"search": false}\n\nSearch when: current events, specific facts not in stored knowledge, URLs, products, people, prices, technical specs.\nDo NOT search when: the user is chatting, asking about their own files, or the answer is clearly in stored knowledge.' },
-      { role: 'user', content: 'Stored knowledge topics: ' + knowledgeTopics + '\n\nUser says: ' + userMessage }
-    ])
-    const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    return JSON.parse(cleaned)
-  } catch { return { search: false } }
+  const msg = userMessage.toLowerCase()
+  const triggers = ['search', 'look up', 'google', 'find me', 'what is', 'who is', 'where is', 'when did', 'how much', 'price of', 'cost of', 'latest', 'current', 'today', 'news about', 'review of', 'compare', 'vs ', 'definition of', 'meaning of']
+  const hasURL = /https?:\/\/|\.com|\.org|\.net|\.io/.test(msg)
+  const hasTrigger = triggers.some(t => msg.includes(t))
+  if (!hasTrigger && !hasURL) return { search: false }
+  const query = userMessage.replace(/^(search|look up|google|find me)\s*/i, '').substring(0, 120)
+  return { search: true, query }
 }
 
 // ====== GROUNDING ======
@@ -491,11 +518,14 @@ STRUCTURE:
 6. PATTERNS: User communication style, preferences, recurring themes.
 
 RULES:
-- Include everything that matters. Keep too much rather than too little.
+- Proper nouns, URLs, numbers, dates, decisions, and technical specs are NEVER summarized — keep at full fidelity.
+- Merge redundant entries that say the same thing in different words into one.
+- Drop conversational filler (greetings, acknowledgments, restated questions).
+- Collapse sequential status updates into latest-state-only — flag if a reversal occurred.
+- Relationships between projects and people stay intact.
+- If two facts contradict, keep both and mark the conflict.
 - Be factual. No speculation.
-- Preserve specifics — exact names, numbers, URLs, code references, technical details.
-- Note contradictions or updates: "Previously X, now Y."
-- This document replaces raw memory as primary context. Make it complete.
+- Target 40% shorter than raw input without losing a single retrievable fact.
 
 == ALL STORED KNOWLEDGE ==
 ${knowledgeDump}
@@ -552,7 +582,40 @@ async function send() {
 
   try {
     let reply
-    if (hasImage) {
+
+    // ====== /build COMMAND — ARCHITECT MODE ======
+    if (userText.startsWith('/build ')) {
+      const buildRequest = userText.substring(7).trim()
+      dots.textContent = 'Architecting...'
+      addMsg('system', 'Entering architect mode...')
+
+      let specPrompt = BUILD_SPEC_PROMPT + '\n\n'
+      if (latestGrounding) {
+        specPrompt += '== YOUR KNOWLEDGE (use this to inform the design) ==\n' + latestGrounding + '\n== END KNOWLEDGE ==\n\n'
+      }
+      if (knowledgeBase.length > 0) {
+        specPrompt += '== DOMAIN EXPERTISE (' + knowledgeBase.length + ' entries) ==\n'
+        knowledgeBase.slice(-10).forEach(k => {
+          specPrompt += '[' + k.source_type.toUpperCase() + '] ' + k.source_name + ': ' + k.content.substring(0, 300) + '\n'
+        })
+        specPrompt += '== END EXPERTISE ==\n'
+      }
+
+      reply = await callLLM([
+        { role: 'system', content: specPrompt },
+        { role: 'user', content: 'Build this: ' + buildRequest }
+      ])
+
+      dots.textContent = reply
+      history.push({ role: 'user', content: userText })
+      history.push({ role: 'assistant', content: reply })
+      await saveMsg('user', userText)
+      await saveMsg('assistant', reply)
+      await saveKnowledge('spec', buildRequest, reply)
+      addMsg('system', 'App spec saved to memory')
+
+    // ====== IMAGE HANDLING ======
+    } else if (hasImage) {
       const path = currentUser.id + '/' + Date.now() + '_' + pendingImage.name
       await sb.storage.from('user-files').upload(path, pendingImage.file)
       const imagePrompt = DEEP_IMAGE_PROMPT + '\n\nThe user says: "' + userText + '"'
@@ -568,9 +631,11 @@ async function send() {
       addMsg('system', 'Deep image analysis saved to memory')
       pendingImage = null
       $('pending-file').style.display = 'none'
+
+    // ====== NORMAL CHAT ======
     } else {
       dots.textContent = 'Thinking...'
-      const searchDecision = await shouldSearch(userText)
+      const searchDecision = shouldSearch(userText)
       let webContext = ''
       if (searchDecision.search && searchDecision.query) {
         dots.textContent = 'Searching: ' + searchDecision.query + '...'

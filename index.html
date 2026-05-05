@@ -197,21 +197,21 @@ async function vaultDecrypt(password, encrypted_data, iv, salt) {
 // ====== GITHUB API MODULE ======
 const GitHub = {
 
-  org: 'hutchautomat-oss',
+  owner: 'hutchautomat-oss',
 
   async getToken() {
     if (!vaultKey) throw new Error('Vault is locked. Click the lock icon and unlock first.')
     const { data } = await sb.from('vault').select('*').eq('name', 'GitHub PAT').limit(1)
     if (!data || data.length === 0) throw new Error('GitHub PAT not found in Vault. Add an entry labeled "GitHub PAT".')
-    const token = await vaultDecrypt(vaultKey, data[0].encrypted_data, data[0].iv, data[0].salt)
+    var token = await vaultDecrypt(vaultKey, data[0].encrypted_data, data[0].iv, data[0].salt)
     return token
   },
 
   async api(endpoint, method, body) {
     method = method || 'GET'
     body = body || null
-    const token = await this.getToken()
-    const res = await fetch('https://api.github.com' + endpoint, {
+    var token = await this.getToken()
+    var res = await fetch('https://api.github.com' + endpoint, {
       method: method,
       headers: {
         'Authorization': 'Bearer ' + token,
@@ -220,14 +220,14 @@ const GitHub = {
       },
       body: body ? JSON.stringify(body) : null
     })
-    const data = await res.json()
+    var data = await res.json()
     if (!res.ok && res.status !== 409) throw new Error('GitHub API error: ' + data.message)
     return { status: res.status, data: data }
   },
 
   async createRepo(name, description) {
     description = description || ''
-    const result = await this.api('/orgs/' + this.org + '/repos', 'POST', {
+    var result = await this.api('/user/repos', 'POST', {
       name: name,
       description: description,
       auto_init: true,
@@ -239,28 +239,28 @@ const GitHub = {
 
   async pushFiles(repo, files, message) {
     message = message || 'Deploy via Back Brain'
-    var ref = await this.api('/repos/' + this.org + '/' + repo + '/git/ref/heads/main')
+    var ref = await this.api('/repos/' + this.owner + '/' + repo + '/git/ref/heads/main')
     var latestSha = ref.data.object.sha
-    var commit = await this.api('/repos/' + this.org + '/' + repo + '/git/commits/' + latestSha)
+    var commit = await this.api('/repos/' + this.owner + '/' + repo + '/git/commits/' + latestSha)
     var baseTree = commit.data.tree.sha
     var tree = []
     for (var i = 0; i < files.length; i++) {
-      var blob = await this.api('/repos/' + this.org + '/' + repo + '/git/blobs', 'POST', {
+      var blob = await this.api('/repos/' + this.owner + '/' + repo + '/git/blobs', 'POST', {
         content: files[i].content,
         encoding: 'utf-8'
       })
       tree.push({ path: files[i].path, mode: '100644', type: 'blob', sha: blob.data.sha })
     }
-    var newTree = await this.api('/repos/' + this.org + '/' + repo + '/git/trees', 'POST', {
+    var newTree = await this.api('/repos/' + this.owner + '/' + repo + '/git/trees', 'POST', {
       base_tree: baseTree,
       tree: tree
     })
-    var newCommit = await this.api('/repos/' + this.org + '/' + repo + '/git/commits', 'POST', {
+    var newCommit = await this.api('/repos/' + this.owner + '/' + repo + '/git/commits', 'POST', {
       message: message,
       tree: newTree.data.sha,
       parents: [latestSha]
     })
-    await this.api('/repos/' + this.org + '/' + repo + '/git/refs/heads/main', 'PATCH', {
+    await this.api('/repos/' + this.owner + '/' + repo + '/git/refs/heads/main', 'PATCH', {
       sha: newCommit.data.sha
     })
     console.log('Pushed ' + files.length + ' file(s) to ' + repo)
@@ -268,10 +268,10 @@ const GitHub = {
   },
 
   async enablePages(repo) {
-    await this.api('/repos/' + this.org + '/' + repo + '/pages', 'POST', {
+    await this.api('/repos/' + this.owner + '/' + repo + '/pages', 'POST', {
       source: { branch: 'main', path: '/' }
     })
-    var url = 'https://' + this.org + '.github.io/' + repo + '/'
+    var url = 'https://' + this.owner + '.github.io/' + repo + '/'
     console.log('Pages live at: ' + url)
     return url
   },
@@ -290,8 +290,8 @@ const GitHub = {
 
   async test() {
     try {
-      var result = await this.api('/orgs/' + this.org)
-      console.log('Connected to ' + result.data.login + ' — ' + result.data.public_repos + ' repos')
+      var result = await this.api('/user')
+      console.log('Connected as ' + result.data.login + ' — ' + result.data.public_repos + ' repos')
       return true
     } catch (e) {
       console.error(e.message)

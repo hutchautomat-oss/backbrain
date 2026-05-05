@@ -79,7 +79,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const GROQ_KEY = ['gsk_HC5s7Yn0WOO6C4P', 'ju4HNWGdyb3FYHT9TXH7U', 'vewXmTs3GNNFymZ3'].join('')
 const BRAVE_KEY = 'BSAqWVfYKZuGVnmrWePSvetv5H9gMHl'
 const TEXT_MODEL = 'llama-3.3-70b-versatile'
-const VISION_MODEL = 'llama-3.2-90b-vision-preview'
+const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 const WHISPER_MODEL = 'whisper-large-v3'
 const GROUNDING_INTERVAL = 10
 
@@ -287,7 +287,6 @@ async function braveSearch(query) {
   } catch (e) {
     if (e.message.includes('Failed to fetch') || e.message.includes('CORS') || e.message.includes('NetworkError')) {
       webSearchAvailable = false
-      return null
     }
     return null
   }
@@ -300,7 +299,7 @@ async function shouldSearch(userMessage) {
       ? knowledgeBase.map(k => k.source_name).join(', ')
       : 'none'
     const result = await callLLM([
-      { role: 'system', content: 'You decide if a web search is needed to answer the user. Respond with ONLY valid JSON, nothing else.\nFormat: {"search": true, "query": "search terms"} or {"search": false}\n\nSearch when: current events, specific facts not in stored knowledge, URLs, products, people, prices, technical specs, anything where guessing would be wrong.\nDo NOT search when: the user is chatting, asking about their own files, or the answer is clearly in stored knowledge.' },
+      { role: 'system', content: 'You decide if a web search is needed. Respond with ONLY valid JSON, nothing else.\nFormat: {"search": true, "query": "search terms"} or {"search": false}\n\nSearch when: current events, specific facts not in stored knowledge, URLs, products, people, prices, technical specs, anything where guessing would be wrong.\nDo NOT search when: the user is chatting, asking about their own files, or the answer is clearly in stored knowledge.' },
       { role: 'user', content: 'Stored knowledge topics: ' + knowledgeTopics + '\n\nUser says: ' + userMessage }
     ])
     const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
@@ -436,7 +435,6 @@ async function send() {
       pendingImage = null
       $('pending-file').style.display = 'none'
     } else {
-      // Step 1: Decide if web search is needed
       dots.textContent = 'Thinking...'
       const searchDecision = await shouldSearch(userText)
 
@@ -455,7 +453,6 @@ async function send() {
       history.push({ role: 'user', content: userText })
       await saveMsg('user', userText)
 
-      // Step 2: Answer with all context combined
       const answerMessages = [...history]
       if (webContext) {
         answerMessages.push({ role: 'system', content: webContext })
@@ -467,7 +464,6 @@ async function send() {
       await saveMsg('assistant', reply)
     }
 
-    // Check for auto-grounding
     await maybeAutoGround()
 
   } catch (e) {

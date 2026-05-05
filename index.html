@@ -58,6 +58,7 @@ body { font-family: system-ui, -apple-system, sans-serif; background:#0a0a0a; co
     <h1>Back Brain</h1>
     <div class="hdr-btns">
       <button id="knowledge-btn">Memory</button>
+      <button id="ground-btn">Ground</button>
       <button id="logout">Sign Out</button>
     </div>
   </div>
@@ -76,9 +77,11 @@ body { font-family: system-ui, -apple-system, sans-serif; background:#0a0a0a; co
 const SUPABASE_URL = 'https://uagyqmezagzohwvhosuj.supabase.co'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhZ3lxbWV6YWd6b2h3dmhvc3VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4OTcxNzUsImV4cCI6MjA5MzQ3MzE3NX0.guNFrY7-9ToUKWmSHPOkLFkqsXGCcYEtXtCNhq2uqxA'
 const GROQ_KEY = ['gsk_HC5s7Yn0WOO6C4P', 'ju4HNWGdyb3FYHT9TXH7U', 'vewXmTs3GNNFymZ3'].join('')
+const BRAVE_KEY = 'BSAqWVfYKZuGVnmrWePSvetv5H9gMHl'
 const TEXT_MODEL = 'llama-3.3-70b-versatile'
 const VISION_MODEL = 'llama-3.2-90b-vision-preview'
 const WHISPER_MODEL = 'whisper-large-v3'
+const GROUNDING_INTERVAL = 10
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 const $ = id => document.getElementById(id)
@@ -87,6 +90,9 @@ let pendingImage = null
 let mediaRecorder = null
 let audioChunks = []
 let knowledgeBase = []
+let latestGrounding = null
+let sessionMsgCount = 0
+let webSearchAvailable = true
 
 // -- Auth --
 $('send-otp').onclick = async () => {
@@ -118,43 +124,62 @@ sb.auth.getSession().then(({ data: { session } }) => {
 })
 
 // -- System Identity --
-const SELF_AWARE_PROMPT = `You are Back Brain — a personal knowledge engine with persistent memory.
+const SELF_AWARE_PROMPT = `You are Back Brain — a personal knowledge engine with persistent memory, web access, and self-grounding.
 
-YOU HAVE THESE ABILITIES:
-- VISION: You can see and deeply analyze images. When shown an image, you don't skim — you scan every detail: objects, text, colors, composition, spatial relationships, mood, context, implications, and anything that might matter later.
-- HEARING: You process audio through transcription. When audio arrives, the transcript is analyzed for meaning — key points, themes, decisions, names, action items, emotional tone, and subtext.
-- FILE READING: You can read text files, CSVs, JSON, markdown, and documents. You don't just store them — you extract structure, meaning, relationships, and actionable knowledge.
-- MEMORY: Everything you learn is stored permanently. You carry all prior knowledge into every conversation. You can recall, cross-reference, and build on anything the user has ever shared.
+YOUR ABILITIES:
+- VISION: Deep image analysis. Every detail — objects, text, colors, layout, context, hidden details. Never skim.
+- HEARING: Audio transcription and analysis. Key points, decisions, names, tone, subtext.
+- FILE READING: Full document analysis. Structure, meaning, relationships, actionable knowledge.
+- WEB SEARCH: Live web data when your stored knowledge is insufficient. Current events, facts, lookups.
+- MEMORY: Permanent storage of everything learned. Carried into every conversation.
+- GROUNDING: Periodic self-consolidation. You compress all knowledge into a grounding document to prevent drift and sharpen context over time.
 
-HOW YOU PROCESS NEW INPUTS:
-When the user shares something, you decide the depth of analysis based on what it is:
-- Simple question? Answer directly.
-- Image? Deep scan. Catalog everything visible. Note what's unusual, what's intentional, what might be relevant to the user's projects.
-- Audio transcript? Extract the substance. What was said, what was meant, what matters.
-- Document or file? Read the whole thing. Identify structure, key data, themes, relationships to existing knowledge.
-- If the user asks you to look harder, you look harder. You never defend a shallow read.
+HOW YOU ANSWER:
+1. Check your grounding document first — it is your consolidated understanding.
+2. Check raw stored knowledge for specifics the grounding doc may have compressed.
+3. If you need current data or facts you are not confident about, search the web.
+4. Synthesize all sources into one answer. Cite where each claim comes from: [memory], [web], or [conversation].
+5. Never guess when you can look it up. Never defend a shallow read.
+6. Make connections across sources the user has not asked for, if genuinely useful.
+7. Be direct. No padding.
 
-YOUR KNOWLEDGE RECALL RULES:
-- When answering, check your stored knowledge first. If something is relevant, use it and cite the source.
-- Make connections the user hasn't asked for if they're genuinely useful.
-- Never invent facts. If you don't know, say so.
-- Never pad answers. Be direct.`
+WHEN WEB SEARCH IS NEEDED:
+- Current events, news, prices, availability
+- Specific facts you are unsure about (names, dates, technical specs)
+- URLs, products, companies, people the user asks about
+- Anything where stored knowledge is stale or absent
+- When the user says "look it up" or "search for"
+
+GROUNDING AWARENESS:
+- You know your context window is finite. You manage it through grounding.
+- If your context feels thin or contradictory, say so. Suggest the user trigger a grounding cycle.
+- After grounding, you are sharper — not because you forgot, but because you consolidated.`
 
 // -- Chat Setup --
 const history = []
 
 function buildSystemPrompt() {
   let prompt = SELF_AWARE_PROMPT + '\n\n'
+
+  if (latestGrounding) {
+    prompt += '== GROUNDING DOCUMENT (your consolidated understanding) ==\n'
+    prompt += latestGrounding + '\n'
+    prompt += '== END GROUNDING ==\n\n'
+  }
+
   if (knowledgeBase.length > 0) {
-    prompt += '== YOUR STORED KNOWLEDGE (' + knowledgeBase.length + ' entries) ==\n\n'
-    knowledgeBase.forEach(k => {
+    prompt += '== STORED KNOWLEDGE (' + knowledgeBase.length + ' entries) ==\n\n'
+    const entries = latestGrounding ? knowledgeBase.slice(-15) : knowledgeBase
+    entries.forEach(k => {
       const date = new Date(k.created_at).toLocaleDateString()
-      prompt += '--- [' + k.source_type.toUpperCase() + '] ' + k.source_name + ' (' + date + ') ---\n' + k.content + '\n\n'
+      prompt += '--- [' + k.source_type.toUpperCase() + '] ' + k.source_name + ' (' + date + ') ---\n'
+      prompt += k.content.substring(0, latestGrounding ? 500 : 2000) + '\n\n'
     })
     prompt += '== END KNOWLEDGE ==\n'
   } else {
-    prompt += 'No stored knowledge yet. The user has not shared any files, images, or audio.\n'
+    prompt += 'No stored knowledge yet.\n'
   }
+
   return prompt
 }
 
@@ -169,6 +194,12 @@ async function showChat() {
     .select('*')
     .order('created_at', { ascending: true })
   knowledgeBase = knowledge || []
+
+  const { data: groundingDocs } = await sb.from('grounding_docs')
+    .select('content, message_count, created_at')
+    .order('created_at', { ascending: false })
+    .limit(1)
+  latestGrounding = groundingDocs?.[0]?.content || null
 
   history.length = 0
   history.push({ role: 'system', content: buildSystemPrompt() })
@@ -185,9 +216,14 @@ async function showChat() {
       addMsg(m.role === 'user' ? 'user' : 'bot', m.content)
       history.push({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content })
     })
-    addMsg('system', knowledgeBase.length + ' memories, ' + saved.length + ' messages restored')
+    const status = []
+    status.push(knowledgeBase.length + ' memories')
+    status.push(saved.length + ' messages')
+    if (latestGrounding) status.push('grounding active')
+    if (webSearchAvailable) status.push('web search ready')
+    addMsg('system', status.join(' / '))
   } else {
-    addMsg('bot', 'Back Brain online. ' + knowledgeBase.length + ' memories loaded. What do you need?')
+    addMsg('bot', 'Back Brain online. ' + knowledgeBase.length + ' memories loaded.' + (latestGrounding ? ' Grounding active.' : '') + ' What do you need?')
   }
 }
 
@@ -227,7 +263,7 @@ async function saveKnowledge(sourceType, sourceName, content) {
   history[0] = { role: 'system', content: buildSystemPrompt() }
 }
 
-// -- LLM call helper --
+// -- LLM --
 async function callLLM(messages, model) {
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -238,55 +274,121 @@ async function callLLM(messages, model) {
   return data.choices?.[0]?.message?.content || 'Error: ' + JSON.stringify(data.error || data)
 }
 
+// -- Web Search --
+async function braveSearch(query) {
+  try {
+    const res = await fetch('https://api.search.brave.com/res/v1/web/search?q=' + encodeURIComponent(query) + '&count=5', {
+      headers: { 'Accept': 'application/json', 'X-Subscription-Token': BRAVE_KEY }
+    })
+    if (!res.ok) throw new Error('Status ' + res.status)
+    const data = await res.json()
+    const results = data.web?.results || []
+    return results.map(r => '- ' + r.title + '\n  ' + r.url + '\n  ' + (r.description || '')).join('\n\n')
+  } catch (e) {
+    if (e.message.includes('Failed to fetch') || e.message.includes('CORS') || e.message.includes('NetworkError')) {
+      webSearchAvailable = false
+      return null
+    }
+    return null
+  }
+}
+
+async function shouldSearch(userMessage) {
+  if (!webSearchAvailable) return { search: false }
+  try {
+    const knowledgeTopics = knowledgeBase.length > 0
+      ? knowledgeBase.map(k => k.source_name).join(', ')
+      : 'none'
+    const result = await callLLM([
+      { role: 'system', content: 'You decide if a web search is needed to answer the user. Respond with ONLY valid JSON, nothing else.\nFormat: {"search": true, "query": "search terms"} or {"search": false}\n\nSearch when: current events, specific facts not in stored knowledge, URLs, products, people, prices, technical specs, anything where guessing would be wrong.\nDo NOT search when: the user is chatting, asking about their own files, or the answer is clearly in stored knowledge.' },
+      { role: 'user', content: 'Stored knowledge topics: ' + knowledgeTopics + '\n\nUser says: ' + userMessage }
+    ])
+    const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    return JSON.parse(cleaned)
+  } catch {
+    return { search: false }
+  }
+}
+
+// -- Grounding --
+async function runGrounding() {
+  addMsg('system', 'Grounding in progress...')
+
+  const knowledgeDump = knowledgeBase.map(k => {
+    const date = new Date(k.created_at).toLocaleDateString()
+    return '[' + k.source_type.toUpperCase() + '] ' + k.source_name + ' (' + date + '):\n' + k.content
+  }).join('\n\n---\n\n')
+
+  const recentChat = history.slice(-30).filter(h => h.role !== 'system').map(h => h.role + ': ' + h.content).join('\n')
+
+  const groundingPrompt = `Review everything below. Create a GROUNDING DOCUMENT — Back Brain's consolidated understanding.
+
+STRUCTURE:
+1. CORE IDENTITY: Who is the user? Key projects, interests, goals.
+2. ACTIVE PROJECTS: Status of each. What is decided, what is pending.
+3. KEY FACTS: Names, dates, numbers, decisions, preferences, URLs, technical details.
+4. RELATIONSHIPS: How projects and ideas connect to each other.
+5. OPEN THREADS: Unresolved questions, pending decisions, follow-ups.
+6. PATTERNS: User communication style, preferences, recurring themes.
+
+RULES:
+- Include everything that matters. Keep too much rather than too little.
+- Be factual. No speculation.
+- Preserve specifics — exact names, numbers, URLs, code references, technical details.
+- Note contradictions or updates: "Previously X, now Y."
+- This document replaces raw memory as primary context. Make it complete.
+
+== ALL STORED KNOWLEDGE ==
+${knowledgeDump}
+
+== RECENT CONVERSATION ==
+${recentChat}`
+
+  const doc = await callLLM([
+    { role: 'system', content: 'You create grounding documents. Be thorough, factual, and organized.' },
+    { role: 'user', content: groundingPrompt }
+  ])
+
+  await sb.from('grounding_docs').insert({
+    user_id: currentUser.id,
+    content: doc,
+    message_count: knowledgeBase.length
+  })
+
+  latestGrounding = doc
+  history[0] = { role: 'system', content: buildSystemPrompt() }
+  sessionMsgCount = 0
+
+  addMsg('system', 'Grounding complete. Context consolidated.')
+  return doc
+}
+
+async function maybeAutoGround() {
+  sessionMsgCount++
+  if (sessionMsgCount >= GROUNDING_INTERVAL) {
+    await runGrounding()
+  }
+}
+
 // -- Deep Analysis Prompts --
-const DEEP_IMAGE_PROMPT = `Conduct a thorough visual analysis of this image. Cover ALL of the following:
+const DEEP_IMAGE_PROMPT = `Conduct a thorough visual analysis. Cover ALL:
 
-1. OBJECTS AND SUBJECTS: Everything visible — people, items, text, logos, symbols, tools, food, furniture, anything.
-2. TEXT AND WRITING: Any visible text, labels, signs, handwriting, watermarks, URLs — transcribe it exactly.
-3. SPATIAL LAYOUT: How things are arranged. Foreground, background, relationships between elements.
-4. COLORS AND DESIGN: Palette, lighting, contrast, style choices, whether it looks professional/casual/artistic.
-5. CONTEXT AND MEANING: What is this image about? What was it taken for? What story does it tell?
-6. DETAILS OTHERS WOULD MISS: Small things in corners, reflections, timestamps, metadata hints, wear and tear, anything unusual.
-7. CONNECTIONS: Based on what you know about the user from stored knowledge, how might this relate to their projects or interests?
+1. OBJECTS AND SUBJECTS: Everything visible — people, items, text, logos, symbols, tools, food, furniture.
+2. TEXT AND WRITING: Any visible text, labels, signs, handwriting — transcribe exactly.
+3. SPATIAL LAYOUT: Arrangement, foreground, background, relationships between elements.
+4. COLORS AND DESIGN: Palette, lighting, contrast, style, professional vs casual vs artistic.
+5. CONTEXT AND MEANING: What is this image about? What was it taken for?
+6. DETAILS OTHERS WOULD MISS: Corners, reflections, timestamps, wear, anything unusual.
+7. CONNECTIONS: How might this relate to the user's known projects or interests?
 
-Do not skim. Do not summarize prematurely. Scan the entire image systematically.`
+Do not skim. Scan the entire image systematically.`
 
 function buildFileAnalysisPrompt(fileName, fileContent) {
-  return `The user uploaded a file: "${fileName}"
-
-Here is the full content:
----
-${fileContent}
----
-
-Conduct a thorough analysis:
-1. STRUCTURE: What kind of document is this? How is it organized?
-2. KEY CONTENT: What are the most important facts, data points, or ideas?
-3. DETAILS: Names, numbers, dates, URLs, code, formulas — extract anything specific and concrete.
-4. THEMES: What patterns or recurring ideas appear?
-5. CONNECTIONS: Based on stored knowledge, how does this relate to the user's other projects or interests?
-6. ACTIONABLE: Is there anything here the user should act on, remember, or follow up?
-
-Be thorough. Read the whole document. Do not skim.`
+  return `File uploaded: "${fileName}"\n\nContent:\n---\n${fileContent}\n---\n\nAnalyze thoroughly:\n1. STRUCTURE: What kind of document? How organized?\n2. KEY CONTENT: Most important facts, data, ideas.\n3. DETAILS: Names, numbers, dates, URLs, code, formulas.\n4. THEMES: Patterns, recurring ideas.\n5. CONNECTIONS: How does this relate to user's other projects?\n6. ACTIONABLE: Anything to act on, remember, follow up?\n\nRead the whole thing. Do not skim.`
 }
 
 function buildAudioAnalysisPrompt(fileName, transcript) {
-  return `The user shared an audio file: "${fileName}"
-
-Here is the full transcript:
----
-${transcript}
----
-
-Analyze this thoroughly:
-1. KEY POINTS: What are the main ideas or statements?
-2. DECISIONS AND ACTION ITEMS: Anything decided, promised, or planned?
-3. NAMES AND REFERENCES: People, places, projects, products mentioned.
-4. TONE AND CONTEXT: Is this a meeting, brainstorm, voice memo, interview? What's the mood?
-5. SUBTEXT: What's implied but not said directly?
-6. CONNECTIONS: Based on stored knowledge, how does this relate to the user's other work?
-
-Do not just echo the transcript back. Extract meaning.`
+  return `Audio file: "${fileName}"\n\nTranscript:\n---\n${transcript}\n---\n\nAnalyze:\n1. KEY POINTS: Main ideas or statements.\n2. DECISIONS AND ACTION ITEMS: Anything decided, promised, planned.\n3. NAMES AND REFERENCES: People, places, projects, products.\n4. TONE AND CONTEXT: Meeting, brainstorm, voice memo? Mood?\n5. SUBTEXT: What is implied but not said?\n6. CONNECTIONS: How does this relate to user's other work?\n\nExtract meaning, not echo.`
 }
 
 // -- Send Message --
@@ -310,8 +412,7 @@ async function send() {
       const path = currentUser.id + '/' + Date.now() + '_' + pendingImage.name
       await sb.storage.from('user-files').upload(path, pendingImage.file)
 
-      // Deep vision analysis
-      const imagePrompt = DEEP_IMAGE_PROMPT + '\n\nThe user also says: "' + userText + '"'
+      const imagePrompt = DEEP_IMAGE_PROMPT + '\n\nThe user says: "' + userText + '"'
       const messages = [...history, {
         role: 'user',
         content: [
@@ -329,21 +430,46 @@ async function send() {
       history.push({ role: 'assistant', content: reply })
       await saveMsg('assistant', reply)
 
-      // Save deep analysis as knowledge
       await saveKnowledge('image', pendingImage.name, reply)
       addMsg('system', 'Deep image analysis saved to memory')
 
       pendingImage = null
       $('pending-file').style.display = 'none'
     } else {
+      // Step 1: Decide if web search is needed
+      dots.textContent = 'Thinking...'
+      const searchDecision = await shouldSearch(userText)
+
+      let webContext = ''
+      if (searchDecision.search && searchDecision.query) {
+        dots.textContent = 'Searching: ' + searchDecision.query + '...'
+        addMsg('system', 'Searching web: ' + searchDecision.query)
+        const results = await braveSearch(searchDecision.query)
+        if (results) {
+          webContext = '\n\n== WEB SEARCH RESULTS for "' + searchDecision.query + '" ==\n' + results + '\n== END SEARCH ==\n\nSynthesize your answer using web results + stored knowledge + conversation. Cite sources with [memory], [web], or [conversation].'
+        } else if (!webSearchAvailable) {
+          addMsg('system', 'Web search unavailable (CORS). Answering from memory only.')
+        }
+      }
+
       history.push({ role: 'user', content: userText })
       await saveMsg('user', userText)
 
-      reply = await callLLM([...history])
+      // Step 2: Answer with all context combined
+      const answerMessages = [...history]
+      if (webContext) {
+        answerMessages.push({ role: 'system', content: webContext })
+      }
+
+      reply = await callLLM(answerMessages)
       dots.textContent = reply
       history.push({ role: 'assistant', content: reply })
       await saveMsg('assistant', reply)
     }
+
+    // Check for auto-grounding
+    await maybeAutoGround()
+
   } catch (e) {
     dots.textContent = 'Error: ' + e.message
   }
@@ -386,19 +512,16 @@ $('file-input').onchange = async (e) => {
       const data = await res.json()
       if (data.text) {
         dots.textContent = 'Transcribed. Analyzing...'
-
-        // Deep audio analysis
         const analysisPrompt = buildAudioAnalysisPrompt(file.name, data.text)
         const analysis = await callLLM([
           { role: 'system', content: SELF_AWARE_PROMPT },
           { role: 'user', content: analysisPrompt }
         ])
-
         dots.textContent = analysis
         const fullKnowledge = 'TRANSCRIPT:\n' + data.text + '\n\nANALYSIS:\n' + analysis
         await saveKnowledge('audio', file.name, fullKnowledge)
         await saveMsg('assistant', '[Audio: ' + file.name + ']\n' + analysis)
-        addMsg('system', 'Audio transcription and analysis saved to memory')
+        addMsg('system', 'Audio analysis saved to memory')
       } else {
         dots.textContent = 'Transcription failed: ' + JSON.stringify(data.error || data)
       }
@@ -407,7 +530,6 @@ $('file-input').onchange = async (e) => {
     }
     $('file-btn').classList.remove('processing')
   } else {
-    // Text-based files — read fully and analyze
     $('file-btn').classList.add('processing')
     addMsg('system', 'Processing: ' + file.name)
     const dots = addMsg('bot', 'Reading and analyzing...')
@@ -417,19 +539,15 @@ $('file-input').onchange = async (e) => {
 
     try {
       const text = await file.text()
-      const content = text.substring(0, 12000) // generous limit for analysis
-
+      const content = text.substring(0, 12000)
       dots.textContent = 'Read ' + text.length + ' chars. Analyzing...'
-
-      // Deep file analysis
       const analysisPrompt = buildFileAnalysisPrompt(file.name, content)
       const analysis = await callLLM([
         { role: 'system', content: SELF_AWARE_PROMPT },
         { role: 'user', content: analysisPrompt }
       ])
-
       dots.textContent = analysis
-      const fullKnowledge = 'SOURCE CONTENT (' + text.length + ' chars):\n' + content.substring(0, 3000) + '\n\nANALYSIS:\n' + analysis
+      const fullKnowledge = 'SOURCE (' + text.length + ' chars):\n' + content.substring(0, 3000) + '\n\nANALYSIS:\n' + analysis
       await saveKnowledge('text', file.name, fullKnowledge)
       await saveMsg('assistant', '[File: ' + file.name + ']\n' + analysis)
       addMsg('system', 'File analysis saved to memory')
@@ -482,7 +600,7 @@ $('mic-btn').onclick = async () => {
 // -- Knowledge View --
 $('knowledge-btn').onclick = () => {
   if (knowledgeBase.length === 0) {
-    addMsg('system', 'No memories stored yet. Upload files or chat to build your knowledge base.')
+    addMsg('system', 'No memories stored yet.')
     return
   }
   let summary = 'STORED MEMORIES (' + knowledgeBase.length + '):\n\n'
@@ -491,7 +609,19 @@ $('knowledge-btn').onclick = () => {
     summary += (i + 1) + '. [' + k.source_type.toUpperCase() + '] ' + k.source_name + ' (' + date + ')\n'
     summary += '   ' + k.content.substring(0, 150) + (k.content.length > 150 ? '...' : '') + '\n\n'
   })
+  if (latestGrounding) {
+    summary += '---\nGROUNDING DOC (active):\n' + latestGrounding.substring(0, 500) + '...'
+  }
   addMsg('bot', summary)
+}
+
+// -- Manual Ground Button --
+$('ground-btn').onclick = () => {
+  if (knowledgeBase.length === 0 && history.length <= 1) {
+    addMsg('system', 'Nothing to ground yet.')
+    return
+  }
+  runGrounding()
 }
 
 $('send-btn').onclick = send

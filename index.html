@@ -488,15 +488,17 @@ async function braveSearch(query) {
   }
 }
 
-function shouldSearch(userMessage) {
+async function shouldSearch(userMessage) {
   if (!webSearchAvailable) return { search: false }
-  const msg = userMessage.toLowerCase()
-  const triggers = ['search', 'look up', 'google', 'find me', 'what is', 'who is', 'where is', 'when did', 'how much', 'price of', 'cost of', 'latest', 'current', 'today', 'news about', 'review of', 'compare', 'vs ', 'definition of', 'meaning of']
-  const hasURL = /https?:\/\/|\.com|\.org|\.net|\.io/.test(msg)
-  const hasTrigger = triggers.some(t => msg.includes(t))
-  if (!hasTrigger && !hasURL) return { search: false }
-  const query = userMessage.replace(/^(search|look up|google|find me)\s*/i, '').substring(0, 120)
-  return { search: true, query }
+  try {
+    const knowledgeTopics = knowledgeBase.length > 0 ? knowledgeBase.map(k => k.source_name).join(', ') : 'none'
+    const result = await callLLM([
+      { role: 'system', content: 'You decide if a web search is needed. Respond with ONLY valid JSON, nothing else.\nFormat: {"search": true, "query": "search terms"} or {"search": false}\n\nSearch when: current events, specific facts not in stored knowledge, URLs, products, people, prices, technical specs.\nDo NOT search when: the user is chatting, asking about their own files, or the answer is clearly in stored knowledge.' },
+      { role: 'user', content: 'Stored knowledge topics: ' + knowledgeTopics + '\n\nUser says: ' + userMessage }
+    ])
+    const cleaned = result.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    return JSON.parse(cleaned)
+  } catch { return { search: false } }
 }
 
 // ====== GROUNDING ======
@@ -635,7 +637,7 @@ async function send() {
     // ====== NORMAL CHAT ======
     } else {
       dots.textContent = 'Thinking...'
-      const searchDecision = shouldSearch(userText)
+      const searchDecision = await shouldSearch(userText)
       let webContext = ''
       if (searchDecision.search && searchDecision.query) {
         dots.textContent = 'Searching: ' + searchDecision.query + '...'

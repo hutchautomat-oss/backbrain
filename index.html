@@ -220,7 +220,7 @@ const GitHub = {
       },
       body: body ? JSON.stringify(body) : null
     })
-    var data = await res.json()
+    var data = res.status === 204 ? null : await res.json()
     if (!res.ok && res.status !== 409) throw new Error('GitHub API error: ' + data.message)
     return { status: res.status, data: data }
   },

@@ -1,147 +1,142 @@
-Thought (33s)
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Back Brain</title>
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0a;color:#e0e0e0;height:100vh;display:flex;justify-content:center;align-items:center}
-        .panel{text-align:center;width:320px}
-        .panel h1{font-size:1.8rem;color:#c8a84e;margin-bottom:8px}
-        .panel .sub{color:#666;margin-bottom:24px;font-size:.9rem}
-        .panel input{width:100%;padding:12px 16px;margin-bottom:12px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:1rem;outline:none;text-align:center;letter-spacing:2px}
-        .panel input[type=email]{text-align:left;letter-spacing:normal}
-        .panel input:focus{border-color:#c8a84e}
-        .panel button.main{width:100%;padding:12px;background:#c8a84e;color:#0a0a0a;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;margin-top:4px}
-        .panel button.main:hover{background:#d4b65e}
-        .panel button.main:disabled{background:#555;cursor:not-allowed}
-        .err{color:#e74c3c;margin-top:12px;font-size:.85rem;word-break:break-word}
-        .back{margin-top:16px;color:#666;font-size:.85rem}
-        .back a{color:#c8a84e;cursor:pointer;text-decoration:none}
-        .hidden{display:none}
-        #chat{display:none;flex-direction:column;width:100%;height:100vh;max-width:700px;margin:0 auto}
-        #chat-head{padding:16px 20px;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center}
-        #chat-head h2{color:#c8a84e;font-size:1.2rem}
-        #chat-head button{background:none;border:1px solid #333;color:#666;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:.8rem}
-        #msgs{flex:1;overflow-y:auto;padding:20px}
-        .m{margin-bottom:16px;max-width:80%}
-        .m.u{margin-left:auto;text-align:right}
-        .m .b{display:inline-block;padding:10px 16px;border-radius:12px;font-size:.95rem;line-height:1.5}
-        .m.u .b{background:#c8a84e;color:#0a0a0a}
-        .m.a .b{background:#1a1a1a;color:#e0e0e0}
-        #bar{display:flex;padding:16px 20px;border-top:1px solid #222;gap:12px}
-        #bar input{flex:1;padding:12px 16px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#e0e0e0;font-size:1rem;outline:none;text-align:left;letter-spacing:normal}
-        #bar input:focus{border-color:#c8a84e}
-        #bar button{padding:12px 20px;background:#c8a84e;color:#0a0a0a;border:none;border-radius:8px;font-weight:600;cursor:pointer}
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Back Brain</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: system-ui, -apple-system, sans-serif; background:#0a0a0a; color:#e0e0e0; height:100vh; display:flex; flex-direction:column; }
+#login { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; gap:12px; }
+#login h1 { font-size:1.5rem; color:#fff; margin-bottom:8px; }
+#login input, #login button { width:280px; padding:12px; border-radius:8px; border:1px solid #333; font-size:1rem; }
+#login input { background:#1a1a1a; color:#fff; }
+#login button { background:#2563eb; color:#fff; border:none; cursor:pointer; }
+#login button:hover { background:#1d4ed8; }
+#login .subtle { color:#888; font-size:0.85rem; }
+#chat { display:none; flex-direction:column; height:100vh; }
+#header { padding:12px 16px; border-bottom:1px solid #222; display:flex; justify-content:space-between; align-items:center; }
+#header h1 { font-size:1.1rem; color:#fff; }
+#header button { background:none; border:1px solid #444; color:#aaa; padding:6px 12px; border-radius:6px; cursor:pointer; font-size:0.85rem; }
+#messages { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:12px; }
+.msg { max-width:80%; padding:10px 14px; border-radius:12px; line-height:1.5; font-size:0.95rem; white-space:pre-wrap; }
+.user { background:#2563eb; color:#fff; align-self:flex-end; border-bottom-right-radius:4px; }
+.bot { background:#1e1e1e; color:#e0e0e0; align-self:flex-start; border-bottom-left-radius:4px; }
+#input-bar { padding:12px 16px; border-top:1px solid #222; display:flex; gap:8px; }
+#input-bar input { flex:1; padding:12px; border-radius:8px; border:1px solid #333; background:#1a1a1a; color:#fff; font-size:1rem; }
+#input-bar button { padding:12px 20px; border-radius:8px; background:#2563eb; color:#fff; border:none; cursor:pointer; font-size:1rem; }
+</style>
 </head>
 <body>
-<div id="step1" class="panel">
-    <h1>Back Brain</h1>
-    <p class="sub">Universal memory mount</p>
-    <input type="email" id="email" placeholder="Enter your email" />
-    <button class="main" id="sendBtn" onclick="sendCode()">Send Code</button>
-    <div id="s1-err" class="err"></div>
+
+<div id="login">
+  <h1>Back Brain</h1>
+  <input type="email" id="email" placeholder="Email address" />
+  <button id="send-otp">Send Login Code</button>
+  <input type="text" id="otp" placeholder="Enter 6-digit code" style="display:none" />
+  <button id="verify-otp" style="display:none">Verify</button>
+  <div class="subtle" id="login-msg"></div>
 </div>
-<div id="step2" class="panel hidden">
-    <h1>Back Brain</h1>
-    <p class="sub" id="sent-to">Code sent to your email</p>
-    <input type="text" id="code" placeholder="Enter code" maxlength="8" />
-    <button class="main" onclick="verifyCode()">Verify</button>
-    <div id="s2-err" class="err"></div>
-    <div class="back"><a onclick="backToEmail()">Use a different email</a></div>
-</div>
+
 <div id="chat">
-    <div id="chat-head">
-        <h2>Back Brain</h2>
-        <button onclick="logout()">Disconnect</button>
-    </div>
-    <div id="msgs"></div>
-    <div id="bar">
-        <input type="text" id="inp" placeholder="Ask anything..." onkeydown="if(event.key==='Enter')send()" />
-        <button onclick="send()">Send</button>
-    </div>
+  <div id="header">
+    <h1>Back Brain</h1>
+    <button id="logout">Sign Out</button>
+  </div>
+  <div id="messages"></div>
+  <div id="input-bar">
+    <input type="text" id="msg-input" placeholder="Ask Back Brain..." />
+    <button id="send-btn">Send</button>
+  </div>
 </div>
+
 <script>
-const API='https://uagyqmezagzohwvhosuj.supabase.co/functions/v1/auth-handler';
-let tk=localStorage.getItem('bb_token');
-let userEmail='';
-if(tk)showChat();
-async function sendCode(){
-    const e=document.getElementById('email').value.trim();
-    const err=document.getElementById('s1-err');
-    const btn=document.getElementById('sendBtn');
-    err.textContent='';
-    if(!e){err.textContent='Enter your email';return}
-    btn.disabled=true;btn.textContent='Sending...';
-    try{
-        const r=await fetch(API+'/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e})});
-        const txt=await r.text();
-        let d;
-        try{d=JSON.parse(txt)}catch(x){err.textContent='Server returned: '+txt;btn.disabled=false;btn.textContent='Send Code';return}
-        if(!r.ok){err.textContent=d.error||'Failed ('+r.status+')';btn.disabled=false;btn.textContent='Send Code';return}
-        userEmail=e;
-        document.getElementById('sent-to').textContent='Code sent to '+e;
-        document.getElementById('step1').classList.add('hidden');
-        document.getElementById('step2').classList.remove('hidden');
-        document.getElementById('code').focus();
-    }catch(x){err.textContent='Network error: '+x.message}
-    btn.disabled=false;btn.textContent='Send Code';
+const SUPABASE_URL = 'https://uagyqmezagzohwvhosuj.supabase.co'
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhZ3lxbWV6YWd6b2h3dmhvc3VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4OTcxNzUsImV4cCI6MjA5MzQ3MzE3NX0.guNFrY7-9ToUKWmSHPOkLFkqsXGCcYEtXtCNhq2uqxA'
+const GEMINI_KEY = 'AIzaSyDVFxLiznS2e3QMK7TR-_lzVF5UdEXFX3I'
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+const $ = id => document.getElementById(id)
+
+$('send-otp').onclick = async () => {
+  const email = $('email').value.trim()
+  if (!email) return
+  $('login-msg').textContent = 'Sending code...'
+  const { error } = await sb.auth.signInWithOtp({ email })
+  if (error) { $('login-msg').textContent = error.message; return }
+  $('otp').style.display = 'block'
+  $('verify-otp').style.display = 'block'
+  $('login-msg').textContent = 'Check your email for the code.'
 }
-async function verifyCode(){
-    const c=document.getElementById('code').value.trim();
-    const err=document.getElementById('s2-err');
-    err.textContent='';
-    if(!c){err.textContent='Enter the code from your email';return}
-    try{
-        const r=await fetch(API+'/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:userEmail,token:c})});
-        const txt=await r.text();
-        let d;
-        try{d=JSON.parse(txt)}catch(x){err.textContent='Server returned: '+txt;return}
-        if(!r.ok){err.textContent=d.error||'Verification failed ('+r.status+')';return}
-        tk=d.session?.access_token||d.access_token||d.token;
-        if(!tk){err.textContent='No token received. Response: '+txt;return}
-        localStorage.setItem('bb_token',tk);
-        if(d.session?.refresh_token)localStorage.setItem('bb_refresh',d.session.refresh_token);
-        showChat();
-    }catch(x){err.textContent='Network error: '+x.message}
+
+$('verify-otp').onclick = async () => {
+  const email = $('email').value.trim()
+  const token = $('otp').value.trim()
+  if (!token) return
+  $('login-msg').textContent = 'Verifying...'
+  const { error } = await sb.auth.verifyOtp({ email, token, type: 'email' })
+  if (error) { $('login-msg').textContent = error.message; return }
+  showChat()
 }
-function backToEmail(){
-    document.getElementById('step2').classList.add('hidden');
-    document.getElementById('step1').classList.remove('hidden');
-    document.getElementById('s2-err').textContent='';
-    document.getElementById('code').value='';
+
+$('logout').onclick = async () => {
+  await sb.auth.signOut()
+  location.reload()
 }
-function showChat(){
-    document.getElementById('step1').classList.add('hidden');
-    document.getElementById('step2').classList.add('hidden');
-    document.getElementById('chat').style.display='flex';
+
+sb.auth.getSession().then(({ data: { session } }) => { if (session) showChat() })
+
+function showChat() {
+  $('login').style.display = 'none'
+  $('chat').style.display = 'flex'
+  $('msg-input').focus()
+  addMsg('bot', 'Back Brain online. What do you need?')
 }
-function logout(){
-    tk=null;localStorage.removeItem('bb_token');localStorage.removeItem('bb_refresh');
-    document.getElementById('chat').style.display='none';
-    document.getElementById('step1').classList.remove('hidden');
+
+const history = []
+
+function addMsg(role, text) {
+  const d = document.createElement('div')
+  d.className = 'msg ' + (role === 'user' ? 'user' : 'bot')
+  d.textContent = text
+  $('messages').appendChild(d)
+  $('messages').scrollTop = $('messages').scrollHeight
 }
-async function send(){
-    const i=document.getElementById('inp'),msg=i.value.trim();
-    if(!msg)return;i.value='';
-    addMsg(msg,'u');
-    try{
-        const r=await fetch('https://uagyqmezagzohwvhosuj.supabase.co/functions/v1/chat-handler',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tk},body:JSON.stringify({message:msg})});
-        const txt=await r.text();
-        let d;
-        try{d=JSON.parse(txt)}catch(x){addMsg('Server returned: '+txt,'a');return}
-        if(!r.ok){if(r.status===401){logout();return}addMsg(d.error||'Failed','a');return}
-        addMsg(d.reply||d.response||d.message,'a');
-    }catch(x){addMsg('Network error: '+x.message,'a')}
+
+async function send() {
+  const text = $('msg-input').value.trim()
+  if (!text) return
+  $('msg-input').value = ''
+  addMsg('user', text)
+  history.push({ role: 'user', parts: [{ text }] })
+
+  addMsg('bot', '...')
+  const dots = $('messages').lastChild
+
+  try {
+    const res = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: 'You are Back Brain, a universal memory assistant for Hutch Automat. Be concise, direct, and helpful. Remember context within this conversation.' }] },
+          contents: history
+        })
+      }
+    )
+    const data = await res.json()
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from model.'
+    dots.textContent = reply
+    history.push({ role: 'model', parts: [{ text: reply }] })
+  } catch (e) {
+    dots.textContent = 'Error: ' + e.message
+  }
 }
-function addMsg(t,c){
-    const d=document.createElement('div');d.className='m '+c;
-    d.innerHTML='<div class="b">'+t+'</div>';
-    const m=document.getElementById('msgs');m.appendChild(d);m.scrollTop=m.scrollHeight;
-}
+
+$('send-btn').onclick = send
+$('msg-input').addEventListener('keydown', e => { if (e.key === 'Enter') send() })
 </script>
 </body>
 </html>

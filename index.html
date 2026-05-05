@@ -54,7 +54,7 @@ body { font-family: system-ui, -apple-system, sans-serif; background:#0a0a0a; co
 <script>
 const SUPABASE_URL = 'https://uagyqmezagzohwvhosuj.supabase.co'
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhZ3lxbWV6YWd6b2h3dmhvc3VqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4OTcxNzUsImV4cCI6MjA5MzQ3MzE3NX0.guNFrY7-9ToUKWmSHPOkLFkqsXGCcYEtXtCNhq2uqxA'
-const GEMINI_KEY = 'AIzaSyDVFxLiznS2e3QMK7TR-_lzVF5UdEXFX3I'
+const GROQ_KEY = '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'
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 const $ = id => document.getElementById(id)
@@ -94,7 +94,9 @@ function showChat() {
   addMsg('bot', 'Back Brain online. What do you need?')
 }
 
-const history = []
+const history = [
+  { role: 'system', content: 'You are Back Brain, a universal memory assistant for Hutch Automat. Be concise, direct, and helpful. Remember context within this conversation.' }
+]
 
 function addMsg(role, text) {
   const d = document.createElement('div')
@@ -109,27 +111,27 @@ async function send() {
   if (!text) return
   $('msg-input').value = ''
   addMsg('user', text)
-  history.push({ role: 'user', parts: [{ text }] })
+  history.push({ role: 'user', content: text })
 
   addMsg('bot', '...')
   const dots = $('messages').lastChild
 
   try {
-    const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: 'You are Back Brain, a universal memory assistant for Hutch Automat. Be concise, direct, and helpful. Remember context within this conversation.' }] },
-          contents: history
-        })
-      }
-    )
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + GROQ_KEY
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: history
+      })
+    })
     const data = await res.json()
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from model.'
+    const reply = data.choices?.[0]?.message?.content || 'No response from model.'
     dots.textContent = reply
-    history.push({ role: 'model', parts: [{ text: reply }] })
+    history.push({ role: 'assistant', content: reply })
   } catch (e) {
     dots.textContent = 'Error: ' + e.message
   }
